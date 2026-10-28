@@ -1,0 +1,91 @@
+<script>
+/* ================= quotation marks: smart typing, whole-manuscript conversion, export ================= */
+/* l1 = main quotes (dialogue), l2 = quotes inside quotes; [open, close] */
+const QUOTE_STYLES = {
+  sk: { n: "Slovenské / české  „…“  ‚…‘", l1: ["„", "“"], l2: ["‚", "‘"] },
+  us: { n: "Americké  “…”  ‘…’", l1: ["“", "”"], l2: ["‘", "’"] },
+  gb: { n: "Britské  ‘…’  “…”", l1: ["‘", "’"], l2: ["“", "”"] },
+  de: { n: "Nemecké  »…«  ›…‹", l1: ["»", "«"], l2: ["›", "‹"] },
+  fr: { n: "Francúzske  « … »  ‹ … ›", l1: ["« ", " »"], l2: ["‹ ", " ›"] },
+  none: { n: "Rovné  \"…\"  (bez úprav)", l1: ['"', '"'], l2: ["'", "'"] },
+};
+const quoteStyle = () => (S.p && QUOTE_STYLES[S.p.quotes]) ? S.p.quotes : (LANG === "en" ? "us" : "sk");
+const OPEN_CTX = /[\s(\[{—–\-\/„“”‚‘’«»‹›"']/;
+/* which level a quote character belongs to, given the style the text was written in */
+function quoteLevel(ch, from) {
+  const dbl = "„“”‟\"«»", sgl = "‚‘’‛'‹›";
+  let lv = dbl.includes(ch) ? 1 : sgl.includes(ch) ? 2 : 0;
+  if (!lv) return 0;
+  if (from === "gb") lv = lv === 1 ? 2 : 1;
+  if (from === "de" && "«»".includes(ch)) lv = 1;
+  return lv;
+}
+/* convert the quotes of one block of text; prev = character before the block */
+function convertQuotesText(t, from, to) {
+  if (from === to && to !== "none") { /* still normalise straight quotes typed by hand */ }
+  const st = QUOTE_STYLES[to] || QUOTE_STYLES.sk;
+  let out = "";
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i], prev = i ? t[i - 1] : " ", next = t[i + 1] || " ";
+    const lv = quoteLevel(ch, from);
+    if (!lv) { out += ch; continue; }
+    /* apostrophe inside a word (don't, rock'n'roll) */
+    if ((ch === "'" || ch === "’" || ch === "‘") && /[\p{L}\p{N}]/u.test(prev) && /[\p{L}]/u.test(next)) { out += to === "none" ? "'" : "’"; continue; }
+    const opening = OPEN_CTX.test(prev) && !/[\s.,;:!?…)\]]/.test(next) && !(/[“”‘’«»‹›]/.test(prev) && /[\s.,;:!?…]/.test(next));
+    const pair = lv === 1 ? st.l1 : st.l2;
+    let q = opening ? pair[0] : pair[1];
+    if (to === "fr") { q = opening ? q.trimEnd() + " " : " " + q.trimStart(); if (opening && next === " ") i++; if (!opening && /\s$/.test(out)) out = out.replace(/\s+$/, ""); }
+    out += q;
+  }
+  return out;
+}
+/* convert all text nodes in an html fragment, block by block */
+function convertQuotesHtml(html, from, to) {
+  if (!html) return html;
+  const d = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html"), root = d.body.firstChild;
+  const blocks = root.children.length ? [...root.children] : [root];
+  blocks.forEach(b => {
+    const w = d.createTreeWalker(b, NodeFilter.SHOW_TEXT), nodes = [];
+    let n; while ((n = w.nextNode())) nodes.push(n);
+    /* convert on the joined block text so context crosses <b>/<i> boundaries */
+    const joined = nodes.map(x => x.data).join(""), conv = convertQuotesText(joined, from, to);
+    if (conv.length === joined.length) { let pos = 0; nodes.forEach(x => { x.data = conv.slice(pos, pos + x.data.length); pos += x.data.length; }); }
+    else nodes.forEach(x => { x.data = convertQuotesText(x.data, from, to); });
+  });
+  return root.innerHTML;
+}
+/* html prepared for export in the quote style chosen in Export */
+function exportHtml(html) {
+  const want = S.p?.exp?.quotes;
+  if (!want || want === "text") return html;
+  return convertQuotesHtml(html, quoteStyle(), want);
+}
+/* smart typing: replace a straight " or ' right before the caret */
+function smartQuote() {
+  const style = quoteStyle(); if (style === "none") return;
+  const sel = getSelection(); if (!sel.rangeCount || !sel.isCollapsed) return;
+  const node = sel.anchorNode, off = sel.anchorOffset;
+  if (!node || node.nodeType !== 3 || off < 1) return;
+  const ch = node.data[off - 1]; if (ch !== '"' && ch !== "'") return;
+  let prev = off >= 2 ? node.data[off - 2] : "";
+  if (!prev) { /* look at the previous text in the same paragraph */
+    const r = document.createRange(); const blk = node.parentElement.closest("p,blockquote,h2,h3,div"); if (blk) { r.setStart(blk, 0); r.setEnd(node, off - 1); const t = r.toString(); prev = t ? t[t.length - 1] : ""; }
+  }
+  const st = QUOTE_STYLES[style];
+  let q;
+  const st0 = QUOTE_STYLES[style], o2 = st0.l2[0].trim(), c2 = st0.l2[1].trim();
+  let before = ""; { const blk = node.parentElement.closest("p,blockquote,h2,h3,div"); if (blk) { const r0 = document.createRange(); r0.setStart(blk, 0); r0.setEnd(node, off - 1); before = r0.toString(); } }
+  const openSingle = before.lastIndexOf(o2) > before.lastIndexOf(c2) && o2 !== c2;
+  if (ch === "'" && prev && /[\p{L}\p{N}]/u.test(prev) && !(openSingle && /[\s.,;:!?…]/.test(node.data[off] || " "))) q = "’";
+  else { const opening = !prev || OPEN_CTX.test(prev); const pair = ch === '"' ? st.l1 : st.l2; q = opening ? pair[0] : pair[1]; if (style === "fr") q = opening ? q.trimEnd() + " " : " " + q.trimStart(); }
+  node.data = node.data.slice(0, off - 1) + q + node.data.slice(off);
+  const r = document.createRange(); r.setStart(node, off - 1 + q.length); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+}
+/* rewrite every scene of the project from one style to another */
+function convertProjectQuotes(to) {
+  const from = quoteStyle(); let changed = 0;
+  allTexts().forEach(n => { const it = S.items[n.id]; if (!it || !it.html) return; const h = convertQuotesHtml(it.html, from, to); if (h !== it.html) { it.html = h; n.chars = countChars(h); saveItem(n.id); changed++; } });
+  S.p.quotes = to; saveProject();
+  return changed;
+}
+</script>

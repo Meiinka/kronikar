@@ -1,0 +1,74 @@
+<script>
+/* ================= external links (Instagram, YouTube, Spotify …) ================= */
+I.ext = '<svg viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M11.5 9.5v4h-9v-9h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const REF_KINDS = {
+  instagram: { n: "Instagram", b: "IG", c: "#C13584" }, youtube: { n: "YouTube", b: "YT", c: "#D93025" }, spotify: { n: "Spotify", b: "SP", c: "#1AA34A" },
+  pinterest: { n: "Pinterest", b: "PIN", c: "#BD081C" }, tiktok: { n: "TikTok", b: "TT", c: "#25808A" }, soundcloud: { n: "SoundCloud", b: "SC", c: "#E8590C" },
+  wiki: { n: "Wikipédia", b: "W", c: "#5B6472" }, drive: { n: "Google Drive", b: "GD", c: "#1E8E3E" }, web: { n: "Web", b: "WEB", c: "#6B7385" },
+};
+function normUrl(s) { s = (s || "").trim(); if (!s) return ""; if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = "https://" + s; return s; }
+function refInfo(url) {
+  let u; try { u = new URL(url); } catch { return { kind: "web", host: url, yt: null }; }
+  const h = u.hostname.replace(/^(www|m|music)\./, "");
+  let kind = "web", yt = null;
+  if (/(^|\.)instagram\.com$/.test(h) || h === "instagr.am") kind = "instagram";
+  else if (/(^|\.)youtube\.com$/.test(h) || h === "youtu.be") {
+    kind = "youtube";
+    yt = h === "youtu.be" ? u.pathname.slice(1).split("/")[0] : (u.searchParams.get("v") || (u.pathname.match(/\/(shorts|embed|live)\/([\w-]{6,})/) || [])[2] || null);
+  }
+  else if (/spotify\.com$/.test(h)) kind = "spotify"; else if (/pinterest\./.test(h) || h === "pin.it") kind = "pinterest";
+  else if (/tiktok\.com$/.test(h)) kind = "tiktok"; else if (/soundcloud\.com$/.test(h)) kind = "soundcloud";
+  else if (/wikipedia\.org$/.test(h)) kind = "wiki"; else if (/(drive|docs)\.google\.com$/.test(h)) kind = "drive";
+  return { kind, host: h, path: decodeURIComponent(u.pathname).replace(/\/$/, ""), yt };
+}
+function refFallback(r) { const i = refInfo(r.url); if (i.kind === "instagram") { const m = i.path.match(/^\/([\w.]+)$/); return m ? "@" + m[1] : "Príspevok na Instagrame"; } if (i.kind === "youtube") return "Video na YouTube"; return i.host + (i.path && i.path.length < 40 ? i.path : ""); }
+function refsHtml(refs, stacked) {
+  const rows = (refs || []).map((r, i) => {
+    const inf = refInfo(r.url), k = REF_KINDS[inf.kind];
+    const badge = `<span class="rbadge" style="--rc:${k.c}" title="${k.n}"${inf.yt ? " hidden" : ""}>${k.b}</span>`;
+    const lead = inf.yt ? `<span><img class="thumb" src="https://i.ytimg.com/vi/${esc(inf.yt)}/mqdefault.jpg" alt="" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false">${badge}</span>` : badge;
+    return `<div class="ref">${lead}<div class="rmid"><input class="rt" data-rt="${i}" value="${esc(r.title || "")}" placeholder="${esc(refFallback(r))}" aria-label="Popis odkazu"><span class="rh">${esc(k.n === "Web" ? inf.host : k.n + " · " + inf.host)}</span></div>
+      <a class="btn icon ghost" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" title="Otvoriť ${esc(r.url)}">${I.ext}</a><button class="btn icon ghost" data-rrm="${i}" title="Odstrániť odkaz">×</button></div>`;
+  }).join("");
+  return `<div class="refs">${rows}</div>
+    <div class="refadd${stacked ? " stack" : ""}"><input class="inp" data-rurl placeholder="Vlož odkaz – Instagram, YouTube, Spotify…" inputmode="url" autocomplete="off"><input class="inp" data-rtitle placeholder="Popis (voliteľné)" autocomplete="off"><button class="btn" data-radd>${I.plus}Pridať</button></div>`;
+}
+/* holder: object with .refs; save(): persist; rerender(): redraw the block */
+function bindRefs(box, holder, save, rerender) {
+  const url = $("[data-rurl]", box), title = $("[data-rtitle]", box);
+  const add = () => {
+    const u = normUrl(url.value); if (!u) { url.focus(); return; }
+    try { new URL(u); } catch { toast("Toto nevyzerá ako odkaz."); return; }
+    holder.refs = holder.refs || []; holder.refs.push({ id: uid("r"), url: u, title: title.value.trim(), added: Date.now() });
+    save(); rerender(); setTimeout(() => $("[data-rurl]", box)?.focus(), 20);
+  };
+  $("[data-radd]", box).onclick = add;
+  [url, title].forEach(x => x.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } });
+  url.addEventListener("paste", () => setTimeout(() => { if (/^\S+\.\S+/.test(url.value) && !title.value) title.focus(); }, 0));
+  const sv = debounce(save, 500);
+  $$("[data-rt]", box).forEach(inp => inp.oninput = () => { holder.refs[+inp.dataset.rt].title = inp.value; sv(); });
+  $$("[data-rrm]", box).forEach(b => b.onclick = () => { holder.refs.splice(+b.dataset.rrm, 1); save(); rerender(); });
+}
+function mountRefs(box, holder, save, stacked) {
+  if (!box) return;
+  const draw = () => { box.innerHTML = refsHtml(holder.refs, stacked); bindRefs(box, holder, save, draw); const c = box.closest("[data-refcount]"); if (c) { const n = (holder.refs || []).length; $(".rc", c).textContent = n || ""; } };
+  draw();
+}
+function allRefs() {
+  const out = [];
+  walk(S.p.binder, n => (n.refs || []).forEach(r => out.push({ r, owner: n.title || "Bez názvu", kind: n.type === "text" ? "Scéna" : n.kind === "part" ? "Časť" : "Kapitola", go: () => { S.sel = n.id; setMode("write"); } })));
+  Object.values(S.ents).forEach(e => (e.refs || []).forEach(r => out.push({ r, owner: e.name || "Bez mena", kind: CAT[e.cat]?.one || "", color: catColor(e.cat), go: () => openEnt(e.id) })));
+  return out;
+}
+function renderAllRefs(box) {
+  if (!box) return;
+  const all = allRefs(), kinds = [...new Set(all.map(x => refInfo(x.r.url).kind))];
+  const f = S.refFilter && kinds.includes(S.refFilter) ? S.refFilter : "all";
+  const list = all.filter(x => f === "all" || refInfo(x.r.url).kind === f);
+  box.innerHTML = !all.length ? '<div class="empty">Zatiaľ žiadne odkazy. Pridáš ich pri zázname vo Svete alebo v inšpektore scény či kapitoly.</div>' :
+    `<div class="chips">${[["all", "Všetky", all.length], ...kinds.map(k => [k, REF_KINDS[k].n, all.filter(x => refInfo(x.r.url).kind === k).length])].map(([k, n, c]) => `<button class="chip link${f === k ? " on" : ""}" data-rf="${k}">${n} <b class="mono">${c}</b></button>`).join("")}</div>
+    <div class="occ">${list.map((x, i) => { const inf = refInfo(x.r.url), k = REF_KINDS[inf.kind]; return `<div class="refrow"><span class="rbadge" style="--rc:${k.c}">${k.b}</span><a href="${esc(x.r.url)}" target="_blank" rel="noopener noreferrer">${esc(x.r.title || refFallback(x.r))}</a><button class="owner" data-go="${i}">${x.color ? `<span class="cd" style="background:${x.color}"></span>` : ""}${esc(x.owner)} <small>${esc(x.kind)}</small></button></div>`; }).join("")}</div>`;
+  $$("[data-rf]", box).forEach(b => b.onclick = () => { S.refFilter = b.dataset.rf; renderAllRefs(box); });
+  $$("[data-go]", box).forEach(b => b.onclick = () => list[+b.dataset.go].go());
+}
+</script>

@@ -1,0 +1,54 @@
+<script>
+/* ================= Android app bridge: folder access through AndroidFS ================= */
+(function () {
+  const A = window.AndroidFS;
+  if (!A) return;
+  document.documentElement.classList.add("android-app");
+  const notFound = () => Object.assign(new Error("Súbor neexistuje"), { name: "NotFoundError" });
+  const fileHandle = (dir, name) => ({
+    kind: "file", name,
+    async getFile() {
+      const raw = A.stat(dir, name); if (!raw) throw notFound();
+      const m = JSON.parse(raw);
+      return { name, lastModified: m.lm || 0, size: m.size || 0, async text() { const t = A.read(dir, name); if (t === null || t === undefined) throw notFound(); return t; } };
+    },
+    async createWritable() {
+      let buf = "";
+      return {
+        async write(d) { buf += typeof d === "string" ? d : await new Response(d).text(); },
+        async close() { if (!A.write(dir, name, buf)) throw Object.assign(new Error("Zápis do priečinka zlyhal"), { name: "NotAllowedError" }); },
+      };
+    },
+  });
+  const dirHandle = dir => ({
+    kind: "directory", name: dir || A.folderName(),
+    async *entries() {
+      const raw = A.list(dir);
+      if (raw === null || raw === undefined) throw Object.assign(new Error("Priečinok nie je dostupný"), { name: "NotAllowedError" });
+      for (const it of JSON.parse(raw)) yield [it.name, it.kind === "directory" ? dirHandle(it.name) : fileHandle(dir, it.name)];
+    },
+    async getFileHandle(name, opt = {}) { if (!opt.create && !A.stat(dir, name)) throw notFound(); return fileHandle(dir, name); },
+    async getDirectoryHandle(name, opt = {}) { if (opt.create ? !A.ensureDir(name) : !A.stat("", name)) throw notFound(); return dirHandle(name); },
+    async removeEntry(name) { A.remove(dir, name); },
+    async queryPermission() { return A.hasFolder() ? "granted" : "prompt"; },
+    async requestPermission() { return A.hasFolder() ? "granted" : "denied"; },
+  });
+  window.__androidDir = () => dirHandle("");
+  window.showDirectoryPicker = () => new Promise((res, rej) => {
+    window.__afsPicked = ok => { window.__afsPicked = null; ok ? res(dirHandle("")) : rej(Object.assign(new Error("Zrušené"), { name: "AbortError" })); };
+    A.pickFolder();
+  });
+  /* system back button: leave focus mode, side panels, then the project */
+  window.__androidBack = () => {
+    if (document.body.classList.contains("focus")) { document.body.classList.remove("focus"); return true; }
+    if (typeof S === "undefined") return false;
+    if (S.view === "project" && S.mode === "write" && (S.insp || S.mobBinder)) { S.insp = false; S.mobBinder = false; if (typeof wsClass === "function") wsClass(); return true; }
+    if (S.view === "project" && S.mode === "world" && S.worldPane === "detail") { S.worldPane = "list"; renderMode(); return true; }
+    if (S.view === "project" && S.mode !== "write") { setMode("write"); return true; }
+    if (S.view === "project") { goHome(); return true; }
+    return false;
+  };
+  window.__androidPause = () => { try { if (typeof flushEditor === "function") flushEditor(); flush().then(() => { if (S.p && Sync.state === "ok") Sync.push(S.p.id); }); } catch (e) { console.warn(e); } return true; };
+  window.__androidResume = () => { try { if (Sync.state === "ok") Sync.poll(); } catch { } return true; };
+})();
+</script>

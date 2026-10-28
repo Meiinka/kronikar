@@ -1,0 +1,140 @@
+<script>
+/* ================= select a word in the manuscript → add it to the world ================= */
+const SelPop = {
+  el: null, locked: false, ctx: null, dismissed: "",
+  ensure() {
+    if (this.el) return this.el;
+    const el = this.el = document.createElement("div");
+    el.className = "selpop"; el.hidden = true; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "Pridať do sveta");
+    el.addEventListener("mousedown", e => { if (!e.target.closest("input,textarea,summary")) e.preventDefault(); });
+    el.addEventListener("pointerdown", () => { this.locked = true; });
+    el.addEventListener("focusin", () => { this.locked = true; });
+    el.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); this.close(); } });
+    document.body.appendChild(el);
+    return el;
+  },
+  hide() { if (this.el) this.el.hidden = true; this.locked = false; this.ctx = null; },
+  /* explicit close: forget this selection so it does not pop up again */
+  close() {
+    if (this.ctx) this.dismissed = this.ctx.sig;
+    this.hide();
+    try { const s = getSelection(); if (s.rangeCount && !s.isCollapsed && $("#ed")?.contains(s.anchorNode)) s.collapseToEnd(); } catch { }
+  },
+  clean(t) { return t.replace(/\s+/g, " ").trim().replace(/^[„"“‚'«»(\[–—-]+/, "").replace(/[.,;:!?…"“”‘’'»)\]–—-]+$/, "").trim(); },
+  /* tolerant match: first name only, or a declined form (Ilsa / Ilsou / Ilsy) */
+  similar(txt) {
+    const sw = norm(txt).split(/\s+/).filter(w => w.length >= 3);
+    if (!sw.length) return [];
+    const close = (a, b) => { if (a === b) return true; if (a.length < 4 || b.length < 4) return false; let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i >= Math.max(3, Math.min(a.length, b.length) - 2); };
+    return Object.values(S.ents).filter(e => e.name && sw.every(w => entTerms(e).join(" ").split(/[\s,]+/).some(n => close(w, n)))).slice(0, 4);
+  },
+  update() {
+    if (this.locked) return;
+    const ed = $("#ed"), sel = getSelection();
+    if (!ed || S.view !== "project" || S.mode !== "write" || !sel.rangeCount || sel.isCollapsed) { this.dismissed = ""; return this.hide(); }
+    const r = sel.getRangeAt(0);
+    if (!ed.contains(r.commonAncestorContainer)) return this.hide();
+    const txt = this.clean(sel.toString());
+    if (!txt || txt.length > 80 || txt.split(" ").length > 8) return this.hide();
+    const f = S.sel ? findNode(S.sel) : null; if (!f || f.n.type !== "text") return this.hide();
+    const rect = r.getBoundingClientRect(), sig = f.n.id + "|" + txt + "|" + Math.round(rect.top) + "|" + Math.round(rect.left);
+    if (sig === this.dismissed) return;
+    this.ctx = { txt, node: f.n, rect, sig };
+    this.menu();
+  },
+  place() {
+    const el = this.el, rect = this.ctx.rect; el.hidden = false;
+    /* phones: dock to the screen edge opposite the selection, so Android's own
+       Cut/Copy/Paste bar (drawn right next to the selected word) never covers it */
+    const phone = matchMedia("(pointer: coarse)").matches || innerWidth < 760;
+    el.classList.toggle("docked", phone);
+    if (phone) {
+      const gap = 76, mid = (rect.top + rect.bottom) / 2;
+      el.style.left = "8px"; el.style.right = "8px";
+      if (mid < innerHeight / 2) {
+        /* word in the upper half → window at the bottom */
+        const room = Math.max(190, innerHeight - rect.bottom - gap);
+        el.style.maxHeight = room + "px"; el.style.top = "auto"; el.style.bottom = "8px";
+      } else {
+        /* word in the lower half → window at the top */
+        const room = Math.max(190, rect.top - gap);
+        el.style.maxHeight = room + "px"; el.style.bottom = "auto"; el.style.top = "calc(8px + env(safe-area-inset-top, 0px))";
+      }
+      return;
+    }
+    el.style.right = "auto"; el.style.bottom = "auto"; el.style.maxHeight = "";
+    const pw = el.offsetWidth, ph = el.offsetHeight;
+    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - pw / 2), innerWidth - pw - 8);
+    let top = rect.bottom + 12; if (top + ph > innerHeight - 8) top = Math.max(8, rect.top - ph - 12);
+    el.style.left = left + "px"; el.style.top = top + "px";
+  },
+  link(id) { const n = this.ctx.node; n.ents = [...new Set([...(n.ents || []), id])]; saveProject(); },
+  head(title, sub) { return `<div class="sp-head"><span class="sp-t">${esc(title)}</span>${sub ? `<span class="hint">${esc(sub)}</span>` : ""}<button class="sp-x" data-spx aria-label="Zavrieť" title="Zavrieť (Esc)">×</button></div>`; },
+  /* step 1: what is the selected word? */
+  menu() {
+    const el = this.ensure(), { txt } = this.ctx;
+    const ex = Object.values(S.ents).find(e => entTerms(e).includes(norm(txt)));
+    const near = ex ? [] : this.similar(txt);
+    el.innerHTML = this.head(txt) + (ex
+      ? `<span class="hint">Už je vo svete${norm(ex.name) === norm(txt) ? "" : " ako tvar záznamu <b>" + esc(ex.name) + "</b>"}.</span><div class="btnrow"><button class="btn sm primary" data-spopen>${I.globe}Otvoriť kartu</button><button class="btn sm" data-splink>Len priradiť k scéne</button></div>`
+      : `${near.length ? `<span class="lbl">Je to tvar existujúceho záznamu?</span><div class="sp-cats">${near.map(e => `<button class="sp-cat" data-spform="${e.id}" style="--cc:${catColor(e.cat)}"><i></i>${esc(e.name)}</button>`).join("")}</div>` : ""}
+        <details class="sp-more"><summary>Priradiť ako tvar k inému záznamu…</summary>
+          <input class="inp" id="spFind" placeholder="Hľadaj záznam" autocomplete="off"><div class="sp-cats" id="spFound"></div></details>
+        <div class="sp-new"><span class="lbl">Nový záznam – základný tvar mena</span>
+          <input class="inp" id="spName" value="${esc(txt)}" autocomplete="off" aria-label="Základný tvar mena">
+          <div class="sp-cats">${CATS.map(c => `<button class="sp-cat" data-spcat="${c.id}" style="--cc:${catColor(c.id)}"><i></i>${esc(c.one)}</button>`).join("")}</div></div>`);
+    this.place();
+    $("[data-spx]", el).onclick = () => this.close();
+    $("[data-spopen]", el)?.addEventListener("click", () => { const id = ex.id; this.link(id); this.hide(); openEnt(id); });
+    $("[data-splink]", el)?.addEventListener("click", () => { this.link(ex.id); this.close(); renderInspector(); toast("Priradené k scéne."); });
+    const asForm = id => { const e = S.ents[id]; this.link(id); const n = addForms(e, [txt]); this.close(); renderInspector(); toast(n ? "„" + txt + "“ je teraz tvar záznamu " + e.name + "." : "Priradené k scéne."); };
+    $$("[data-spform]", el).forEach(b => b.onclick = () => asForm(b.dataset.spform));
+    const find = $("#spFind"), found = $("#spFound");
+    if (find) find.oninput = () => {
+      const q = norm(find.value.trim());
+      const list = q ? Object.values(S.ents).filter(e => norm(e.name + " " + (e.forms || []).join(" ")).includes(q)).slice(0, 8) : [];
+      found.innerHTML = list.map(e => `<button class="sp-cat" data-spf="${e.id}" style="--cc:${catColor(e.cat)}"><i></i>${esc(e.name)}</button>`).join("") || (q ? '<span class="hint">Nič sa nenašlo.</span>' : "");
+      $$("[data-spf]", found).forEach(b => b.onclick = () => asForm(b.dataset.spf));
+    };
+    $$("[data-spcat]", el).forEach(b => b.onclick = () => {
+      const name = ($("#spName").value || txt).trim() || txt;
+      const id = newEnt(b.dataset.spcat), e = S.ents[id];
+      e.name = name; saveEnt(id); this.link(id);
+      if (norm(name) !== norm(txt)) addForms(e, [txt]);
+      this.forms(e);
+    });
+  },
+  /* step 2: declension of the new name, right here */
+  forms(e) {
+    const el = this.el, sugg = suggestForms(e);
+    el.innerHTML = this.head(e.name, CAT[e.cat]?.one) + `
+      <span class="lbl">Tvary mena – vyber správne</span>
+      ${sugg.length ? `<div class="sp-cats">${sugg.map(f => `<button class="sp-form on" data-f="${esc(f)}" aria-pressed="true">${esc(f)}</button>`).join("")}</div><span class="hint">Ťuknutím tvar vypneš alebo zapneš.</span>` : `<span class="hint">Pre toto meno nemám návrhy, dopíš tvary sama.</span>`}
+      ${(e.forms || []).length ? `<span class="hint">Už pridané: ${esc(e.forms.join(", "))}</span>` : ""}
+      <input class="inp" id="spOwn" placeholder="Ďalšie tvary a prezývky, oddeľ čiarkou" autocomplete="off">
+      <div class="btnrow"><button class="btn sm primary" data-spsave="open">${I.globe}Uložiť a otvoriť kartu</button><button class="btn sm" data-spsave="stay">Uložiť a písať ďalej</button></div>`;
+    this.place();
+    this.locked = true;
+    $("[data-spx]", el).onclick = () => { this.close(); toast("„" + e.name + "“ je vo svete, tvary si doplníš na karte."); };
+    $$("[data-f]", el).forEach(b => b.onclick = () => { b.classList.toggle("on"); b.setAttribute("aria-pressed", b.classList.contains("on")); });
+    const save = how => {
+      const picked = $$("[data-f].on", el).map(b => b.dataset.f).concat(($("#spOwn").value || "").split(","));
+      const n = addForms(e, picked);
+      this.close(); renderInspector();
+      toast("„" + e.name + "“ pridané do sveta" + (n ? " s " + n + " " + plural(n, "tvarom", "tvarmi", "tvarmi") : "") + ".");
+      if (how === "open") { openEnt(e.id); setTimeout(() => $("#eSum")?.focus(), 60); }
+    };
+    $$("[data-spsave]", el).forEach(b => b.onclick = () => save(b.dataset.spsave));
+    $("#spOwn").onkeydown = ev => { if (ev.key === "Enter") save("stay"); };
+  },
+};
+document.addEventListener("selectionchange", debounce(() => SelPop.update(), 220));
+/* a tap outside the window closes it; a tap back in the text lets a new selection through */
+document.addEventListener("pointerdown", e => {
+  const el = SelPop.el; if (!el || el.hidden || el.contains(e.target)) return;
+  if (e.target.closest("#ed")) SelPop.locked = false; else SelPop.close();
+}, true);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && SelPop.el && !SelPop.el.hidden) SelPop.close(); });
+window.addEventListener("resize", () => { if (!SelPop.locked) SelPop.hide(); });
+document.addEventListener("scroll", e => { if (SelPop.el && !SelPop.el.hidden && !SelPop.el.contains(e.target) && !SelPop.locked) SelPop.hide(); }, true);
+</script>

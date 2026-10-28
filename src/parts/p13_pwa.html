@@ -1,0 +1,32 @@
+<script>
+/* ================= installable app (PWA) ================= */
+async function loadPdfMake() {
+  if (window.pdfMake) return;
+  try { await loadScript("pdfmake.min.js"); if (window.pdfMake) return; } catch { } /* bundled copy next to the app (installer, PWA, Android) */
+  await loadScript(PDFMAKE);
+}
+const PWA = {
+  prompt: null,
+  standalone: () => window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
+  ios: () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1),
+  init() {
+    if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+      navigator.serviceWorker.register("sw.js").then(reg => {
+        reg.addEventListener("updatefound", () => { const w = reg.installing; if (!w) return; w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) PWA.updateReady = true, PWA.slot(); }); });
+      }).catch(e => console.warn("sw", e));
+    }
+    window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); PWA.prompt = e; PWA.slot(); });
+    window.addEventListener("appinstalled", () => { PWA.prompt = null; PWA.slot(); toast("Kronikár je nainštalovaný."); });
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => { });
+  },
+  slot() {
+    const el = $("#installSlot"); if (!el) return;
+    if (PWA.updateReady) { el.innerHTML = `<button class="btn primary" id="pwaReload">Načítať novú verziu</button>`; $("#pwaReload").onclick = async () => { await flush(); location.reload(); }; return; }
+    if (PWA.standalone() || !location.protocol.startsWith("http")) { el.innerHTML = ""; return; }
+    if (PWA.prompt) { el.innerHTML = `<button class="btn" id="pwaInstall">${I.dl}Nainštalovať aplikáciu</button>`; $("#pwaInstall").onclick = async () => { PWA.prompt.prompt(); await PWA.prompt.userChoice.catch(() => { }); PWA.prompt = null; PWA.slot(); }; return; }
+    if (PWA.ios()) { el.innerHTML = `<span class="hint">Na iPhone: Zdieľať <b>⬆</b> → <b>Pridať na plochu</b></span>`; return; }
+    el.innerHTML = "";
+  },
+};
+PWA.init();
+</script>

@@ -1,0 +1,90 @@
+<script>
+/* ================= name forms: Slovak declension suggestions + manuscript matching ================= */
+const SOFT = /(c|č|ď|dz|j|ľ|ň|š|ť|ž)$/i;
+const ANIMATE_CATS = new Set(["postava", "bozstvo", "rasa"]);
+const KEEP_WORDS = new Set(["z", "zo", "a", "the", "of", "von", "van", "de", "da", "del", "di", "la", "le"]);
+const TITLES = new Set(["brat", "sestra", "kráľ", "kráľovná", "princ", "princezná", "lord", "lady", "pán", "pani", "otec", "matka", "majster", "majsterka", "sir", "vojvoda", "vojvodkyňa", "kapitán", "rytier", "mág", "kňaz", "kňažka", "stará", "starý", "malý", "malá", "veľký", "veľká", "svätý", "svätá"]);
+/* six singular cases N G D A L I for one word (best effort; the author confirms) */
+function declineWord(w, animate) {
+  const lw = w.toLowerCase(), cap = s => w[0] === w[0].toUpperCase() ? s : s;
+  const stem = (n, ends) => ends.map(x => w.slice(0, w.length - n) + x);
+  if (w.length < 2 || KEEP_WORDS.has(lw) || /[^\p{L}'’-]/u.test(w)) return [w, w, w, w, w, w];
+  if (/ová$/.test(lw)) return stem(1, ["á", "ej", "ej", "ú", "ej", "ou"]);
+  if (/(ý)$/.test(lw)) return stem(1, ["ý", "ého", "ému", animate ? "ého" : "ý", "om", "ým"]);
+  if (/(á)$/.test(lw)) return stem(1, ["á", "ej", "ej", "ú", "ej", "ou"]);
+  if (/(é)$/.test(lw)) return stem(1, ["é", "ého", "ému", "é", "om", "ým"]);
+  if (/(í)$/.test(lw)) return [w, w.slice(0, -1) + "ieho", w.slice(0, -1) + "iemu", animate ? w.slice(0, -1) + "ieho" : w, w.slice(0, -1) + "om", w.slice(0, -1) + "ím"];
+  if (/ia$/.test(lw)) return stem(1, ["a", "e", "i", "u", "i", "ou"]);
+  if (/a$/.test(lw)) { const s = SOFT.test(lw.slice(0, -1)); return stem(1, ["a", s ? "e" : "y", s ? "i" : "e", "u", s ? "i" : "e", "ou"]); }
+  if (/o$/.test(lw)) return animate ? stem(1, ["o", "a", "ovi", "a", "ovi", "om"]) : stem(1, ["o", "a", "u", "o", "e", "om"]);
+  if (/[eiuyäôú]$/.test(lw)) return [w, w, w, w, w, w];
+  /* consonant ending */
+  if (animate) return [w, w + "a", w + "ovi", w + "a", w + "ovi", w + "om"];
+  if (SOFT.test(lw)) return [w, w + "a", w + "u", w, w.replace(/ň$/, "n").replace(/ľ$/, "l").replace(/ť$/, "t").replace(/ď$/, "d") + "i", w + "om"];
+  return [w, w + "u", w + "u", w, w + "e", w + "om"];
+}
+const PREPS = new Set(["z", "zo", "s", "so", "na", "v", "vo", "od", "do", "pri", "pod", "nad", "za", "spod", "k", "ku", "bez", "cez", "pre", "o", "po", "u", "of", "from"]);
+const adjLike = (w, notLast) => /(ý|á|é|í|ová)$/i.test(w) || (notLast && /[bcdfghjklmnprstvzž]y$/i.test(w));
+/* one name segment, e.g. "Ilsa Vranová", "Kael z Hmly", "Vardenské kráľovstvo" */
+function declineSegment(seg, animate) {
+  const words = seg.split(/\s+/).filter(Boolean);
+  let stop = words.findIndex((w, i) => i > 0 && PREPS.has(w.toLowerCase())); if (stop < 0) stop = words.length;
+  const decl = [];
+  if (animate) for (let i = 0; i < stop; i++) decl.push(i);
+  else for (let i = 0; i < stop; i++) { decl.push(i); if (!adjLike(words[i], i < stop - 1)) break; }
+  if (!decl.length || (!animate && decl.every(i => adjLike(words[i], i < stop - 1)))) return { full: [], singles: [] };
+  const head = decl[decl.length - 1];
+  const plural = !animate && /[bcdfghjklmnprstvzž]y$/i.test(words[head]);
+  const cases = words.map((w, i) => {
+    if (!decl.includes(i)) return [w, w, w, w, w, w];
+    const lw = w.toLowerCase(), st = (n, ends) => ends.map(x => w.slice(0, w.length - n) + x);
+    if (plural) { if (/y$/.test(lw)) return st(1, ["y", "ov", "om", "y", "och", "ami"]); if (/é$/.test(lw)) return st(1, ["é", "ých", "ým", "é", "ých", "ými"]); return [w, w, w, w, w, w]; }
+    if (i < head && /[bcdfghjklmnprstvzž]y$/i.test(w)) return st(1, ["y", "eho", "emu", animate ? "eho" : "y", "om", "ym"]);
+    return declineWord(w, animate);
+  });
+  const full = []; for (let c = 1; c < 6; c++) full.push(cases.map(x => x[c]).join(" "));
+  const singles = [];
+  if (animate && decl.length > 1) decl.forEach(i => { const w = words[i]; if (w.length > 2 && !TITLES.has(w.toLowerCase()) && w[0] === w[0].toUpperCase() && w[0] !== w[0].toLowerCase() && (!adjLike(w, false) || /ová$/i.test(w))) singles.push(...cases[i]); });
+  return { full, singles };
+}
+function suggestForms(e) {
+  const name = (e.name || "").trim(); if (!name) return [];
+  if (bookLang() === "en") { const ps = name.split(",").map(x => x.trim()).filter(Boolean).flatMap(seg => { const w = seg.split(/\s+/), out = [seg + (/s$/i.test(seg) ? "’" : "’s")]; if (w.length > 1 && /^\p{Lu}/u.test(w[0])) out.push(w[0], w[0] + "’s"); return out; }); return [...new Set(ps)].filter(f => norm(f) !== norm(name) && !(e.forms || []).some(x => norm(x) === norm(f))); }
+  const animate = ANIMATE_CATS.has(e.cat), out = new Set();
+  const segs = name.split(",").map(x => x.trim()).filter(Boolean);
+  segs.forEach(seg => {
+    const r = declineSegment(seg, animate);
+    if (segs.length > 1) out.add(seg);
+    r.full.forEach(f => out.add(f)); r.singles.forEach(f => out.add(f));
+  });
+  const have = new Set([name, ...(e.forms || [])].map(x => norm(x)));
+  return [...out].filter(f => f && !have.has(norm(f)));
+}
+/* all terms that identify an entity in the text */
+function entTerms(e) {
+  const t = [e.name, ...(e.forms || [])].map(x => (x || "").trim()).filter(x => x.length > 1);
+  return [...new Set(t.map(norm))];
+}
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function termRegex(terms) {
+  if (!terms.length) return null;
+  const alt = terms.sort((a, b) => b.length - a.length).map(t => reEsc(t).replace(/\s+/g, "\\s+")).join("|");
+  return new RegExp("(?<![\\p{L}\\p{N}])(?:" + alt + ")(?![\\p{L}\\p{N}])", "gu");
+}
+/* returns {count, snippet} for one scene */
+function findMentions(e, html) {
+  const re = termRegex(entTerms(e)); if (!re || !html) return null;
+  const raw = htmlToText(html).replace(/\n/g, " "), tx = norm(raw);
+  let m, count = 0, first = -1, len = 0;
+  while ((m = re.exec(tx))) { if (first < 0) { first = m.index; len = m[0].length; } count++; }
+  if (!count) return null;
+  const a = Math.max(0, first - 40), b = Math.min(raw.length, first + len + 50);
+  return { count, snippet: (a > 0 ? "…" : "") + raw.slice(a, first) + "«" + raw.slice(first, first + len) + "»" + raw.slice(first + len, b) + (b < raw.length ? "…" : "") };
+}
+function addForms(e, list) {
+  const have = new Set([e.name, ...(e.forms || [])].map(norm)), add = [];
+  list.map(x => x.trim()).filter(Boolean).forEach(x => { if (!have.has(norm(x))) { have.add(norm(x)); add.push(x); } });
+  if (add.length) { e.forms = [...(e.forms || []), ...add]; saveEnt(e.id); }
+  return add.length;
+}
+</script>

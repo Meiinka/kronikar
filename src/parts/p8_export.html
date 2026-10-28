@@ -1,0 +1,134 @@
+<script>
+/* ================= export ================= */
+const PAGE_SIZES = { A5: { n: "A5 (148 × 210 mm)", w: 419.53, h: 595.28 }, "6x9": { n: "6 × 9 palcov (trade paperback)", w: 432, h: 648 }, "5x8": { n: "5 × 8 palcov (vreckové)", w: 360, h: 576 }, B5: { n: "B5 (176 × 250 mm)", w: 498.9, h: 708.66 }, A4: { n: "A4 (210 × 297 mm)", w: 595.28, h: 841.89 }, Letter: { n: "US Letter (8,5 × 11 palcov)", w: 612, h: 792 } };
+const ORD_F = ["Prvá", "Druhá", "Tretia", "Štvrtá", "Piata", "Šiesta", "Siedma", "Ôsma", "Deviata", "Desiata", "Jedenásta", "Dvanásta", "Trinásta", "Štrnásta", "Pätnásta", "Šestnásta", "Sedemnásta", "Osemnásta", "Devätnásta", "Dvadsiata"];
+const roman = n => { const m = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]]; let s = ""; for (const [v, r] of m) while (n >= v) { s += r; n -= v; } return s; };
+
+/* Turn the binder into an ordered list of book sections */
+function bookStructure() {
+  const out = []; let ch = 0, pt = 0;
+  const inc = n => n.include !== false;
+  const textsOf = n => { const a = []; (n.children || []).forEach(k => { if (!inc(k)) return; if (k.type === "text") a.push(k); else a.push(...textsOf(k)); }); return a; };
+  const chapter = (title, texts, node) => { ch++; out.push({ type: "chapter", n: ch, title, texts, node }); };
+  const visit = (n, inPart) => {
+    if (!inc(n)) return;
+    if (n.type === "text") return chapter(n.title, [n], n);
+    if (n.kind === "part" && !inPart) { pt++; out.push({ type: "part", n: pt, title: n.title, node: n }); (n.children || []).forEach(k => visit(k, true)); return; }
+    chapter(n.title, textsOf(n), n);
+  };
+  S.p.binder.forEach(n => visit(n, false));
+  return out;
+}
+function chapLabel(n) { const e = S.p.exp; if (e.numbering === "none") return ""; if (bookLang() === "en") return e.numbering === "num" ? "Chapter " + n : e.numbering === "bare" ? String(n) : "Chapter " + enNum(n); if (e.numbering === "num") return "Kapitola " + n; if (e.numbering === "bare") return String(n); return n <= ORD_F.length ? ORD_F[n - 1] + " kapitola" : "Kapitola " + n; }
+function partLabel(n) { const e = S.p.exp; if (bookLang() === "en") return "Part " + (e.numbering === "word" ? enNum(n) : roman(n)); return e.numbering === "word" && n <= ORD_F.length ? ORD_F[n - 1] + " časť" : "Časť " + roman(n); }
+
+function htmlToPdf(html, fs, o = {}) {
+  const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html");
+  const out = []; let first = true;
+  const runs = (node, st = {}) => {
+    const r = [];
+    node.childNodes.forEach(ch => {
+      if (ch.nodeType === 3) { const t = ch.textContent.replace(/\s+/g, " "); if (t) r.push(Object.assign({ text: t }, st)); }
+      else if (ch.nodeType === 1) {
+        const tg = ch.tagName; if (tg === "BR") { r.push({ text: "\n" }); return; }
+        const s2 = Object.assign({}, st); if (tg === "B" || tg === "STRONG") s2.bold = true; if (tg === "I" || tg === "EM") s2.italics = true;
+        r.push(...runs(ch, s2));
+      }
+    });
+    return r;
+  };
+  const brk = o.brk || (() => ({ text: S.p.exp.sceneBreak || " ", alignment: "center", margin: [0, fs * .6, 0, fs * .6] }));
+  const blocks = [];
+  d.body.firstChild.childNodes.forEach(ch => { if (ch.nodeType === 3) { if (ch.textContent.trim()) blocks.push({ tag: "P", el: (() => { const p = document.createElement("p"); p.textContent = ch.textContent; return p; })() }); } else if (ch.nodeType === 1) blocks.push({ tag: ch.tagName, el: ch }); });
+  blocks.forEach(({ tag, el }) => {
+    const txt = el.textContent.trim();
+    if (!txt) return;
+    if (el.classList?.contains("sb") || /^([*#~·•⁂]\s*){1,5}$/.test(txt)) { out.push(brk()); first = true; return; }
+    const r = runs(el); if (r.length) r[0].text = r[0].text.replace(/^\s+/, "");
+    if (tag === "BLOCKQUOTE") { out.push({ text: r, italics: true, margin: [fs * 1.6, fs * .4, fs * 1.6, fs * .4] }); first = true; return; }
+    if (/^H[1-6]$/.test(tag)) { out.push({ text: r, bold: true, margin: [0, fs, 0, fs * .4], alignment: "left" }); first = true; return; }
+    if ((el.getAttribute("style") || "").includes("center")) { out.push({ text: r, alignment: "center" }); first = true; return; }
+    const para = { text: r, leadingIndent: first && !o.indentFirst ? 0 : (o.indent ?? fs * 1.4) }; if (o.gap) para.margin = [0, 0, 0, o.gap]; out.push(para); first = false;
+  });
+  return out;
+}
+
+function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("Nepodarilo sa načítať " + src)); document.head.appendChild(s); }); }
+const PDFMAKE = "https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/pdfmake.min.js", PDFVFS = "https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js";
+async function blobToB64(b) { return new Promise(r => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.readAsDataURL(b); }); }
+function buildMarkdown() {
+  const p = S.p, lines = ["# " + p.title, p.subtitle ? "_" + p.subtitle + "_" : "", p.author ? "**" + p.author + "**" : "", ""];
+  const md = html => { const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html"); return [...d.body.firstChild.children].map(el => { const t = el.innerHTML.replace(/<\/?(b|strong)>/g, "**").replace(/<\/?(i|em)>/g, "_").replace(/<br>/g, "  \n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim(); if (!t) return ""; if (el.classList.contains("sb")) return "* * *"; if (el.tagName === "BLOCKQUOTE") return "> " + t; return t; }).filter(Boolean).join("\n\n"); };
+  bookStructure().forEach(sec => {
+    if (sec.type === "part") lines.push("", "# " + partLabel(sec.n) + ": " + sec.title, "");
+    else { const l = chapLabel(sec.n); lines.push("", "## " + (l ? l + ": " : "") + sec.title, ""); sec.texts.forEach((t, i) => { if (i) lines.push("", "* * *", ""); lines.push(md(exportHtml(S.items[t.id]?.html))); }); }
+  });
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+/* ================= project / stats ================= */
+function renderStats(main) {
+  const p = S.p, tw = totalWords(), texts = allTexts();
+  const byStatus = STATUSES.map(s => ({ ...s, n: texts.filter(t => (t.status || "napad") === s.id).length, w: texts.filter(t => (t.status || "napad") === s.id).reduce((a, t) => a + (t.words || 0), 0) }));
+  const days = []; for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const k = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); days.push({ k, d, w: (p.history || {})[k] || 0 }); }
+  const max = Math.max(1, ...days.map(d => d.w)), streak = (() => { let s = 0; for (let i = days.length - 1; i >= 0; i--) { if (days[i].w > 0) s++; else if (i === days.length - 1) continue; else break; } return s; })();
+  const cc = {}; Object.values(S.ents).forEach(e => cc[e.cat] = (cc[e.cat] || 0) + 1);
+  main.innerHTML = `<div class="export" style="flex:1"><div class="export-in">
+    <div class="card"><h3>Písanie</h3>
+      <label class="field"><span>Jazyk aplikácie</span><select class="inp" id="sLang"><option value="sk"${LANG === "sk" ? " selected" : ""}>Slovenčina</option><option value="en"${LANG === "en" ? " selected" : ""}>English</option></select></label>
+      <label class="field"><span>Úvodzovky pri písaní</span><select class="inp" id="sQuotes">${Object.entries(QUOTE_STYLES).map(([k, v]) => `<option value="${k}"${quoteStyle() === k ? " selected" : ""}>${esc(v.n)}</option>`).join("")}</select></label>
+      <span class="hint">Klávesa <b class="mono">"</b> vloží hlavné úvodzovky, <b class="mono">'</b> vnorené. Kronikár sám pozná, či sú otváracie alebo zatváracie, a apostrof v slove (don’t) nechá ako apostrof.</span>
+      <div class="btnrow" id="qConvBox"><button class="btn sm" id="qConv">Prepísať úvodzovky v celom rukopise na…</button></div>
+    </div>
+    <div class="card"><h3>Projekt</h3>
+      <div class="fgrid">
+        <label class="field"><span>Názov</span><input class="inp" id="sTitle" value="${esc(p.title)}"></label>
+        <label class="field"><span>Žáner</span><input class="inp" id="sGenre" value="${esc(p.genre || "")}"></label>
+        <label class="field"><span>Autor</span><input class="inp" id="sAuthor" value="${esc(p.author || "")}"></label>
+        <label class="field"><span>Cieľ – celkový počet slov</span><input class="inp mono" type="number" min="0" step="1000" id="sGoal" value="${p.goals?.total || ""}"></label>
+        <label class="field"><span>Cieľ – slov denne</span><input class="inp mono" type="number" min="0" step="50" id="sDaily" value="${p.goals?.daily || ""}"></label>
+      </div>
+      <div class="statrow" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr))">
+        <div class="stat"><b>${nf(tw)}</b><span>slov v rukopise</span></div><div class="stat" title="1 normostrana = 1 800 znakov vrátane medzier"><b>${fmtNS(totalChars())}</b><span>normostrán</span></div><div class="stat"><b>${nf(texts.length)}</b><span>scén</span></div>
+        <div class="stat"><b>${nf(Object.keys(S.ents).length)}</b><span>záznamov sveta</span></div><div class="stat"><b>${nf((p.links || []).length)}</b><span>prepojení</span></div>
+      </div>
+      <div class="btnrow"><button class="btn" id="sBackup">${I.dl}Stiahnuť zálohu</button></div>
+      <span class="hint">${Store.mode === "cloud" ? "Projekt sa ukladá priebežne do tvojho súkromného úložiska tejto aplikácie." : (Sync.state === "ok" ? "Projekt sa po každej zmene automaticky ukladá do priečinka „" + esc(Sync.name) + "“." : "Projekt je uložený len v tomto prehliadači. Automatické ukladanie do priečinka zapneš na úvodnej obrazovke.")}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+      <div class="card"><h3>Písanie za 30 dní<span class="spacer"></span><span class="mono" style="letter-spacing:0;text-transform:none">${streak ? streak + " " + plural(streak, "deň", "dni", "dní") + " v rade" : ""}</span></h3>
+        <div class="hist" role="img" aria-label="Počet slov za posledných 30 dní">${days.map(d => `<i class="${d.w ? "" : "zero"}" style="height:${d.w ? Math.max(4, d.w / max * 100) : 3}%" title="${d.d.toLocaleDateString("sk-SK")}: ${nf(d.w)} slov"></i>`).join("")}</div>
+        <div class="histx"><span>${days[0].d.toLocaleDateString((LANG === "en" ? "en-US" : "sk-SK"), { day: "numeric", month: "short" })}</span><span>najviac ${nf(max === 1 && !days.some(d => d.w) ? 0 : max)} slov za deň</span><span>dnes</span></div>
+      </div>
+      <div class="card"><h3>Stav scén</h3>
+        ${byStatus.map(s => `<div style="display:grid;grid-template-columns:90px minmax(0,1fr) 90px;gap:10px;align-items:center;font-size:13px"><span style="display:flex;align-items:center;gap:6px"><i style="width:8px;height:8px;border-radius:50%;background:var(--st-${s.id})"></i>${s.name}</span><span style="height:8px;background:var(--line-2);border-radius:4px;overflow:hidden"><i style="display:block;height:100%;width:${texts.length ? s.n / texts.length * 100 : 0}%;background:var(--st-${s.id})"></i></span><span class="mono hint" style="text-align:right">${s.n} · ${nf(s.w)} sl.</span></div>`).join("")}
+      </div>
+      <div class="card"><h3>Všetky odkazy</h3><div id="allRefs" style="display:flex;flex-direction:column;gap:10px"></div></div>
+      <div class="card"><h3>Svet</h3><div class="chips">${CATS.map(c => `<span class="chip link" style="cursor:default"><span class="cd" style="background:${catColor(c.id)}"></span>${c.name} <b class="mono">${cc[c.id] || 0}</b></span>`).join("")}</div></div>
+    </div>
+  </div></div>`;
+  $("#sTitle").oninput = e => { p.title = e.target.value; $(".crumb").textContent = "/ " + p.title; saveProject(); };
+  $("#sGenre").oninput = e => { p.genre = e.target.value; saveProject(); };
+  $("#sAuthor").oninput = e => { p.author = e.target.value; saveProject(); };
+  $("#sGoal").oninput = e => { p.goals.total = +e.target.value || 0; saveProject(); updateGoals(); };
+  $("#sDaily").oninput = e => { p.goals.daily = +e.target.value || 0; saveProject(); updateGoals(); };
+  $("#sBackup").onclick = () => exportBackup(p.id);
+  $("#sLang").onchange = e => setLang(e.target.value);
+  $("#sQuotes").onchange = ev => { p.quotes = ev.target.value; saveProject(); toast("Nové úvodzovky sa použijú pri písaní. Už napísaný text prepíšeš tlačidlom nižšie."); };
+  $("#qConv").onclick = () => {
+    const box = $("#qConvBox");
+    box.innerHTML = `<div class="confirm" style="width:100%"><b>Prepísať všetky úvodzovky v rukopise</b><span>Zmení sa text všetkých scén. Kronikár urobí kópiu do zálohy v priečinku iba raz denne, preto si pred väčšou zmenou môžeš stiahnuť zálohu.</span>
+      <select class="inp" id="qTo">${Object.entries(QUOTE_STYLES).filter(([k]) => k !== quoteStyle() && k !== "none").map(([k, v]) => `<option value="${k}">${esc(v.n)}</option>`).join("")}</select>
+      <div class="btnrow"><button class="btn sm danger solid" id="qGo">Prepísať</button><button class="btn sm" id="qNo">Zrušiť</button></div></div>`;
+    $("#qNo").onclick = () => renderStats(main);
+    $("#qGo").onclick = () => { const to = $("#qTo").value; const n = convertProjectQuotes(to); renderStats(main); toast("Úvodzovky prepísané v " + n + " " + plural(n, "scéne", "scénach", "scénach") + "."); };
+  };
+  renderAllRefs($("#allRefs"));
+}
+
+/* ================= boot ================= */
+(async function init() {
+  try { await Store.init(); await loadUserTpls(); await Sync.init(); await loadProjects(); if (Sync.state === "ok") await Sync.pull(); } catch (e) { console.error(e); }
+  render();
+})();
+</script>

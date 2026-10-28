@@ -1,0 +1,192 @@
+<style>
+/* ---------- sticky notes board ---------- */
+.notes{flex:1;overflow:auto;padding:18px clamp(14px,3vw,36px) 90px}
+.notes-in{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.nbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.nbar .inp{width:auto}
+.nbar .nsearch{flex:1 1 180px;min-width:140px}
+.nbar select.inp{flex:0 1 230px}
+.ncats{display:flex;flex-wrap:wrap;gap:6px}
+.ncat{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:4px 11px;font-size:12.5px;color:var(--ink-2)}
+.ncat i{width:9px;height:9px;border-radius:50%;background:var(--nc)}
+.ncat b{font-weight:500;font-family:var(--f-mono);font-size:11px;color:var(--ink-3)}
+.ncat.on{border-color:var(--nc,var(--accent));background:color-mix(in srgb,var(--nc,var(--accent)) 14%,var(--paper));color:var(--ink)}
+.nboard{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;align-items:start}
+.sticky{--nc:var(--ink-3);position:relative;background:color-mix(in srgb,var(--nc) 13%,var(--paper));border:1px solid color-mix(in srgb,var(--nc) 35%,var(--line));border-top:4px solid var(--nc);border-radius:4px 4px 8px 8px;padding:8px 10px 9px;display:flex;flex-direction:column;gap:7px;box-shadow:var(--shadow)}
+.sticky.done{opacity:.62}
+.sticky.done .st-text{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--ink) 40%,transparent)}
+.sticky.fresh{animation:stIn .35s ease-out}
+@keyframes stIn{from{transform:scale(.94);opacity:0}}
+.st-top{display:flex;align-items:center;gap:4px}
+.st-cat{border:0;background:transparent;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--nc) 75%,var(--ink));padding:2px 0;max-width:60%;cursor:pointer}
+.st-cat:focus{outline:none;text-decoration:underline}
+.st-top .spacer{flex:1}
+.st-btn{border:0;background:transparent;border-radius:5px;width:28px;height:28px;display:grid;place-items:center;color:var(--ink-2);font-size:16px;line-height:1}
+.st-btn:hover{background:color-mix(in srgb,var(--nc) 18%,transparent);color:var(--ink)}
+.st-btn[aria-pressed="true"]{color:#fff;background:var(--st-hotovo)}
+.st-btn svg{width:15px;height:15px}
+.st-text{border:0;background:transparent;resize:none;width:100%;min-height:64px;font-family:var(--f-display);font-size:15px;line-height:1.5;padding:2px 0;overflow:hidden;color:var(--ink)}
+.st-text:focus{outline:none}
+.st-refs{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.st-ref{display:inline-flex;align-items:center;gap:4px;border:1px solid color-mix(in srgb,var(--nc) 30%,var(--line));background:var(--paper);border-radius:999px;padding:1px 3px 1px 8px;font-size:12px;max-width:100%}
+.st-ref button{border:0;background:none;padding:0 3px;color:var(--ink-3)}
+.st-ref .go{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;padding:0}
+.st-ref .go:hover{text-decoration:underline}
+.st-add{border:1px dashed color-mix(in srgb,var(--nc) 40%,var(--line));background:transparent;border-radius:999px;font-size:12px;padding:2px 6px;color:var(--ink-2);max-width:100%}
+.st-foot{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--ink-3)}
+.sticky .confirm{font-size:12.5px}
+.ncatedit{display:flex;flex-direction:column;gap:8px}
+.ncrow{display:flex;gap:8px;align-items:center}
+.ncrow input[type=color]{width:34px;height:32px;border:1px solid var(--line);border-radius:6px;padding:2px;background:var(--paper);flex:none}
+.nempty{text-align:center;padding:40px 16px;color:var(--ink-3)}
+.nempty h3{font-family:var(--f-display);color:var(--ink-2);font-weight:600;font-size:19px;margin:0 0 6px}
+/* binder badge + inspector list */
+.bnode .nbadge{flex:none;font-family:var(--f-mono);font-size:10px;line-height:1;padding:2px 4px;border-radius:4px;background:color-mix(in srgb,#C0812A 22%,var(--paper));color:var(--ink-2)}
+.inotes{display:flex;flex-direction:column;gap:6px}
+.inote{--nc:var(--ink-3);display:flex;gap:7px;align-items:flex-start;border-left:3px solid var(--nc);background:color-mix(in srgb,var(--nc) 10%,var(--paper));border-radius:0 6px 6px 0;padding:6px 8px;font-size:13px}
+.inote input{margin-top:3px;flex:none}
+.inote .tx{flex:1;min-width:0;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;cursor:pointer}
+.inote.done .tx{text-decoration:line-through;color:var(--ink-3)}
+.inote .cn{display:block;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--nc) 75%,var(--ink))}
+.iqadd{display:flex;gap:6px}
+.iqadd .inp{flex:1}
+@media (max-width:760px){.nboard{grid-template-columns:1fr 1fr;gap:10px}.nbar select.inp{flex:1 1 100%}}
+@media (max-width:460px){.nboard{grid-template-columns:1fr}}
+</style>
+<script>
+/* ================= sticky notes: free notes with categories, optionally tied to chapters / scenes ================= */
+I.note = '<svg viewBox="0 0 20 20"><path d="M4 3.5h12v8.5l-4.5 4.5H4z M11.5 16.5V12H16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7 7.5h6M7 10h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+I.check = '<svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const NOTE_CATS_DEFAULT = [
+  { id: "zapracovat", name: "Zapracovať", color: "#C0812A" },
+  { id: "napad", name: "Nápad", color: "#3A7FB8" },
+  { id: "overit", name: "Overiť / dohľadať", color: "#6B5BB5" },
+  { id: "opravit", name: "Opraviť", color: "#B5523A" },
+  { id: "otazka", name: "Otázka", color: "#2F8F83" },
+];
+const NOCAT = { id: "", name: "Bez kategórie", color: "#8790A1" };
+function noteData() {
+  const p = S.p;
+  if (!Array.isArray(p.stickies)) p.stickies = [];
+  if (!Array.isArray(p.noteCats)) p.noteCats = NOTE_CATS_DEFAULT.map(c => ({ ...c, name: tl(c.name) }));
+  return p;
+}
+const noteCat = id => (S.p.noteCats || []).find(c => c.id === id) || NOCAT;
+S.nf = { cat: "all", ref: "all", q: "", hideDone: false, catEdit: false, confirm: null, fresh: null };
+/* binder nodes as select options: parts, chapters, scenes */
+function nodeOptions(exclude = []) {
+  const out = [];
+  walk(S.p.binder, (n, par, i, d) => { if (exclude.includes(n.id)) return; const k = n.type === "text" ? "" : n.kind === "part" ? "Časť: " : ""; out.push(`<option value="${n.id}">${"  ".repeat(d)}${k}${esc(n.title || "Bez názvu")}</option>`); });
+  return out.join("");
+}
+const nodeTitle = id => { const f = findNode(id); return f ? (f.n.title || "Bez názvu") : null; };
+/* a note belongs to a node directly, or to a scene inside a chapter it is tied to (when asked with deep) */
+function notesFor(id, deep) {
+  const ids = new Set([id]);
+  if (deep) { const f = findNode(id); if (f) walk(f.n.children || [], n => { ids.add(n.id); }); }
+  return noteData().stickies.filter(s => (s.refs || []).some(r => ids.has(r)));
+}
+function noteBadge(id) { const n = (S.p.stickies || []).filter(s => !s.done && (s.refs || []).includes(id)).length; return n ? `<span class="nbadge" title="${n} ${plural(n, "otvorená poznámka", "otvorené poznámky", "otvorených poznámok")}">${n}</span>` : ""; }
+function addNote(o = {}) {
+  const p = noteData();
+  const s = Object.assign({ id: uid("n"), text: "", cat: p.noteCats[0]?.id || "", refs: [], done: false, created: Date.now(), updated: Date.now() }, o);
+  p.stickies.unshift(s); saveProject(); return s;
+}
+function delNote(id) { const p = noteData(); p.stickies = p.stickies.filter(s => s.id !== id); saveProject(); }
+function goToNode(id) { if (!findNode(id)) return toast("Táto časť rukopisu už neexistuje."); S.sel = id; S.mobBinder = false; S.mode = "write"; $$("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === "write")); renderMode(); }
+
+function renderNotes(main) {
+  const p = noteData(), f = S.nf;
+  if (f.cat !== "all" && f.cat !== "" && !p.noteCats.some(c => c.id === f.cat)) f.cat = "all";
+  if (f.ref !== "all" && f.ref !== "none" && !findNode(f.ref)) f.ref = "all";
+  const q = norm(f.q.trim());
+  const refOk = s => f.ref === "all" ? true : f.ref === "none" ? !(s.refs || []).some(r => findNode(r)) : notesFor(f.ref, true).includes(s);
+  const base = p.stickies.filter(s => refOk(s) && (!q || norm(s.text).includes(q)) && (!f.hideDone || !s.done));
+  const count = id => base.filter(s => (noteCat(s.cat).id) === id).length;
+  const list = base.filter(s => f.cat === "all" || noteCat(s.cat).id === f.cat).sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
+  const cats = [...p.noteCats, NOCAT];
+  const catChip = (c, n) => `<button class="ncat${f.cat === c.id ? " on" : ""}" data-nfc="${esc(c.id)}" style="--nc:${esc(c.color)}"><i></i>${esc(c.name)} <b>${n}</b></button>`;
+  const open = p.stickies.filter(s => !s.done).length;
+  main.innerHTML = `<div class="notes"><div class="notes-in">
+    <div class="nbar">
+      <button class="btn primary" id="nAdd">${I.plus}Nová poznámka</button>
+      <input class="inp nsearch" id="nQ" type="search" placeholder="Hľadať v poznámkach" value="${esc(f.q)}" aria-label="Hľadať v poznámkach">
+      <select class="inp" id="nRef" aria-label="Filtrovať podľa rukopisu"><option value="all">Celý rukopis</option><option value="none"${f.ref === "none" ? " selected" : ""}>Nepriradené ku kapitole</option>${nodeOptions()}</select>
+      <label class="chk"><input type="checkbox" id="nDone"${f.hideDone ? " checked" : ""}> Skryť vybavené</label>
+      <button class="btn" id="nCats" aria-pressed="${f.catEdit}">Kategórie</button>
+    </div>
+    <div class="ncats"><button class="ncat${f.cat === "all" ? " on" : ""}" data-nfc="all">Všetky <b>${base.length}</b></button>${cats.filter(c => c.id || count("")).map(c => catChip(c, count(c.id))).join("")}
+      <span class="hint" style="align-self:center;margin-left:auto">${open} ${plural(open, "otvorená", "otvorené", "otvorených")} z ${p.stickies.length}</span></div>
+    ${f.catEdit ? `<div class="card ncatedit"><h3>Kategórie poznámok<span class="spacer"></span><button class="btn sm" id="ncNew">${I.plus}Pridať</button></h3>
+      ${p.noteCats.map(c => { const n = p.stickies.filter(s => s.cat === c.id).length; return `<div class="ncrow" data-nc="${esc(c.id)}"><input type="color" value="${esc(c.color)}" aria-label="Farba"><input class="inp" value="${esc(c.name)}" aria-label="Názov kategórie">
+        ${f.confirm === "cat:" + c.id ? `<button class="btn sm danger solid" data-ncdel="${esc(c.id)}">Zmazať${n ? " (" + n + " → bez kategórie)" : ""}</button><button class="btn sm" data-ncno>Nechať</button>` : `<button class="btn icon ghost danger" data-ncask="${esc(c.id)}" title="Zmazať kategóriu" aria-label="Zmazať kategóriu">${I.trash}</button>`}</div>`; }).join("")}
+      <span class="hint">Zmazaním kategórie sa poznámky nezmažú, len ostanú bez kategórie.</span></div>` : ""}
+    ${list.length ? `<div class="nboard">${list.map(stickyHtml).join("")}</div>` : `<div class="nempty"><h3>${p.stickies.length ? "Nič tomu nezodpovedá" : "Zatiaľ žiadne poznámky"}</h3><p>${p.stickies.length ? "Skús zmeniť filter." : "Poznámky sú ako lepiace papieriky. Môžeš ich priradiť ku kapitolám alebo scénam, alebo nechať voľne."}</p></div>`}
+  </div></div>`;
+  $("#nAdd").onclick = () => { const s = addNote({ cat: f.cat !== "all" ? f.cat : (p.noteCats[0]?.id || ""), refs: f.ref !== "all" && f.ref !== "none" ? [f.ref] : [] }); f.hideDone = false; f.q = ""; f.fresh = s.id; renderNotes(main); };
+  const qi = $("#nQ"); qi.oninput = debounce(() => { f.q = qi.value; renderNotes(main); const n = $("#nQ"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 200);
+  $("#nRef").value = f.ref; $("#nRef").onchange = e => { f.ref = e.target.value; renderNotes(main); };
+  $("#nDone").onchange = e => { f.hideDone = e.target.checked; renderNotes(main); };
+  $("#nCats").onclick = () => { f.catEdit = !f.catEdit; f.confirm = null; renderNotes(main); };
+  $$("[data-nfc]").forEach(b => b.onclick = () => { f.cat = b.dataset.nfc; renderNotes(main); });
+  /* category editor */
+  $("#ncNew")?.addEventListener("click", () => { const used = p.noteCats.map(c => c.color); p.noteCats.push({ id: uid("nc"), name: "Nová kategória", color: CUSTOM_COLORS.find(c => !used.includes(c)) || "#8790A1" }); saveProject(); renderNotes(main); const r = $$(".ncrow input.inp"); r[r.length - 1]?.select(); });
+  $$(".ncrow").forEach(r => {
+    const c = p.noteCats.find(x => x.id === r.dataset.nc); if (!c) return;
+    const [col, name] = $$("input", r);
+    const upd = debounce(() => { saveProject(); $$(`[data-nfc="${CSS.escape(c.id)}"]`).forEach(b => { b.style.setProperty("--nc", c.color); b.childNodes[1].textContent = c.name + " "; }); $$(".sticky").forEach(st => { const s = p.stickies.find(x => x.id === st.dataset.nid); if (s && s.cat === c.id) { st.style.setProperty("--nc", c.color); const o = $(`.st-cat option[value="${CSS.escape(c.id)}"]`, st); if (o) o.textContent = c.name; } }); }, 200);
+    col.oninput = () => { c.color = col.value; upd(); };
+    name.oninput = () => { c.name = name.value.trim() || "Bez názvu"; upd(); };
+  });
+  $$("[data-ncask]").forEach(b => b.onclick = () => { f.confirm = "cat:" + b.dataset.ncask; renderNotes(main); });
+  $$("[data-ncno]").forEach(b => b.onclick = () => { f.confirm = null; renderNotes(main); });
+  $$("[data-ncdel]").forEach(b => b.onclick = () => { const id = b.dataset.ncdel; p.noteCats = p.noteCats.filter(c => c.id !== id); p.stickies.forEach(s => { if (s.cat === id) s.cat = ""; }); f.confirm = null; saveProject(); renderNotes(main); });
+  $$(".sticky").forEach(el => bindSticky(el, () => renderNotes(main)));
+  if (f.fresh) { const t = $(`.sticky[data-nid="${f.fresh}"] .st-text`); f.fresh = null; t?.focus(); }
+}
+function stickyHtml(s) {
+  const c = noteCat(s.cat), refs = (s.refs || []).filter(r => findNode(r));
+  const conf = S.nf.confirm === "note:" + s.id;
+  return `<div class="sticky${s.done ? " done" : ""}${S.nf.fresh === s.id ? " fresh" : ""}" data-nid="${s.id}" style="--nc:${esc(c.color)}">
+    <div class="st-top"><select class="st-cat" aria-label="Kategória">${[...S.p.noteCats, NOCAT].map(x => `<option value="${esc(x.id)}"${x.id === c.id ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><span class="spacer"></span>
+      <button class="st-btn" data-done aria-pressed="${!!s.done}" title="${s.done ? "Vrátiť medzi otvorené" : "Označiť ako vybavené"}" aria-label="Vybavené">${I.check}</button>
+      <button class="st-btn" data-del title="Zmazať poznámku" aria-label="Zmazať poznámku">×</button></div>
+    <textarea class="st-text" rows="3" placeholder="Napíš poznámku…" aria-label="Text poznámky">${esc(s.text)}</textarea>
+    <div class="st-refs">${refs.map(r => `<span class="st-ref"><button class="go" data-go="${r}" title="Otvoriť v rukopise">${esc(nodeTitle(r))}</button><button data-unref="${r}" aria-label="Odobrať">×</button></span>`).join("")}
+      <select class="st-add" aria-label="Priradiť ku kapitole alebo scéne"><option value="">${refs.length ? "+ ďalšia…" : "+ Priradiť ku kapitole…"}</option>${nodeOptions(refs)}</select></div>
+    ${conf ? `<div class="confirm"><b>Zmazať poznámku?</b><div class="btnrow"><button class="btn sm danger solid" data-delyes>Zmazať</button><button class="btn sm" data-delno>Nechať</button></div></div>` : `<div class="st-foot"><span>${relTime(s.updated || s.created)}</span></div>`}
+  </div>`;
+}
+function bindSticky(el, rerender) {
+  const s = S.p.stickies.find(x => x.id === el.dataset.nid); if (!s) return;
+  const ta = $(".st-text", el), fit = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
+  requestAnimationFrame(fit);
+  ta.oninput = () => { s.text = ta.value; s.updated = Date.now(); fit(); saveProject(); };
+  $(".st-cat", el).onchange = e => { s.cat = e.target.value; s.updated = Date.now(); saveProject(); rerender(); };
+  $("[data-done]", el).onclick = () => { s.done = !s.done; s.updated = Date.now(); saveProject(); rerender(); };
+  $("[data-del]", el).onclick = () => { if (!s.text.trim()) { delNote(s.id); return rerender(); } S.nf.confirm = "note:" + s.id; rerender(); };
+  $("[data-delyes]", el)?.addEventListener("click", () => { S.nf.confirm = null; delNote(s.id); rerender(); toast("Poznámka zmazaná."); });
+  $("[data-delno]", el)?.addEventListener("click", () => { S.nf.confirm = null; rerender(); });
+  $(".st-add", el).onchange = e => { const v = e.target.value; if (!v) return; s.refs = [...new Set([...(s.refs || []), v])]; s.updated = Date.now(); saveProject(); rerender(); };
+  $$("[data-unref]", el).forEach(b => b.onclick = () => { s.refs = (s.refs || []).filter(r => r !== b.dataset.unref); saveProject(); rerender(); });
+  $$("[data-go]", el).forEach(b => b.onclick = () => goToNode(b.dataset.go));
+}
+/* inspector section in the manuscript: notes tied to the selected chapter / scene */
+function mountNoteInsp(box, n) {
+  if (!box) return;
+  const p = noteData(), own = notesFor(n.id, false), inside = n.type === "folder" ? notesFor(n.id, true).filter(s => !own.includes(s)) : [];
+  const parentNotes = []; { let cur = findNode(n.id); while (cur && cur.parent) { notesFor(cur.parent.id, false).forEach(s => { if (!own.includes(s) && !parentNotes.includes(s)) parentNotes.push(s); }); cur = findNode(cur.parent.id); } }
+  const row = (s, from) => { const c = noteCat(s.cat); return `<div class="inote${s.done ? " done" : ""}" style="--nc:${esc(c.color)}"><input type="checkbox" data-idone="${s.id}"${s.done ? " checked" : ""} aria-label="Vybavené"><div class="tx" data-iopen="${s.id}" title="Otvoriť v poznámkach"><span class="cn">${esc(c.name)}${from ? " · " + esc(from) : ""}</span>${esc(s.text || "(prázdna poznámka)")}</div></div>`; };
+  const open = own.filter(s => !s.done).length;
+  box.innerHTML = `<span class="lbl">Lepiace poznámky ${own.length ? `<span class="mono">${open}/${own.length}</span>` : ""}</span>
+    <div class="inotes">${own.map(s => row(s)).join("")}${inside.map(s => row(s, (s.refs || []).map(nodeTitle).filter(Boolean)[0] || "")).join("")}${parentNotes.map(s => row(s, "z nadradenej kapitoly")).join("")}</div>
+    <div class="iqadd"><select class="inp" id="iqCat" aria-label="Kategória" style="flex:0 1 44%">${[...p.noteCats, NOCAT].map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input class="inp" id="iqText" placeholder="Nová poznámka…" aria-label="Nová poznámka"></div>
+    <div class="btnrow"><button class="btn sm" id="iqAdd">${I.plus}Pridať</button><button class="btn sm ghost" id="iqAll">Všetky poznámky</button></div>`;
+  const rerender = () => { mountNoteInsp(box, n); const b = $(`#binder .bnode[data-id="${n.id}"] .nbadge`), w = $(`#binder .bnode[data-id="${n.id}"]`); if (w) { b?.remove(); const nb = noteBadge(n.id); if (nb) $(".w", w)?.insertAdjacentHTML("beforebegin", nb); } };
+  const add = () => { const t = $("#iqText").value.trim(); if (!t) return $("#iqText").focus(); addNote({ text: t, cat: $("#iqCat").value, refs: [n.id] }); rerender(); toast("Poznámka pridaná."); };
+  $("#iqAdd").onclick = add; $("#iqText").onkeydown = e => { if (e.key === "Enter") add(); };
+  $("#iqAll").onclick = () => { S.nf.ref = n.id; S.nf.cat = "all"; setMode("notes"); };
+  $$("[data-idone]", box).forEach(c => c.onchange = () => { const s = p.stickies.find(x => x.id === c.dataset.idone); if (s) { s.done = c.checked; s.updated = Date.now(); saveProject(); rerender(); } });
+  $$("[data-iopen]", box).forEach(d => d.onclick = () => { const s = p.stickies.find(x => x.id === d.dataset.iopen); S.nf.ref = s && notesFor(n.id, true).includes(s) ? n.id : "all"; S.nf.cat = "all"; S.nf.hideDone = false; S.nf.fresh = s?.id || null; setMode("notes"); });
+}
+</script>

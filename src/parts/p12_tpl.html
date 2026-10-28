@@ -1,0 +1,657 @@
+<script>
+/* ================= book & manuscript templates ================= */
+const FONTS = {
+  Literata: { n: "Literata", css: "Literata,Georgia,serif", body: true, docx: "Georgia", files: ["Literata_400Regular.ttf", "Literata_700Bold.ttf", "Literata_400Regular_Italic.ttf", "Literata_700Bold_Italic.ttf"] },
+  EBGaramond: { n: "EB Garamond", css: "'EB Garamond',Garamond,Georgia,serif", body: true, docx: "Garamond", files: ["EBGaramond_400Regular.ttf", "EBGaramond_700Bold.ttf", "EBGaramond_400Regular_Italic.ttf", "EBGaramond_700Bold_Italic.ttf"] },
+  Tinos: { n: "Tinos (ako Times New Roman)", css: "Tinos,'Times New Roman',Times,serif", body: true, docx: "Times New Roman", files: ["Tinos_400Regular.ttf", "Tinos_700Bold.ttf", "Tinos_400Regular_Italic.ttf", "Tinos_700Bold_Italic.ttf"] },
+  CourierPrime: { n: "Courier Prime (ako Courier)", css: "'Courier Prime','Courier New',monospace", body: true, docx: "Courier New", files: ["CourierPrime_400Regular.ttf", "CourierPrime_700Bold.ttf", "CourierPrime_400Regular_Italic.ttf", "CourierPrime_700Bold_Italic.ttf"] },
+  Arimo: { n: "Arimo (ako Arial)", css: "Arimo,Arial,Helvetica,sans-serif", body: true, docx: "Arial", files: ["Arimo_400Regular.ttf", "Arimo_700Bold.ttf", "Arimo_400Regular_Italic.ttf", "Arimo_700Bold_Italic.ttf"] },
+  Cinzel: { n: "Cinzel", css: "Cinzel,'Trajan Pro',Georgia,serif", docx: "Cinzel", files: ["Cinzel_400Regular.ttf", "Cinzel_700Bold.ttf", "Cinzel_400Regular.ttf", "Cinzel_700Bold.ttf"] },
+  Cormorant: { n: "Cormorant Garamond", css: "'Cormorant Garamond',Garamond,Georgia,serif", docx: "Cormorant Garamond", files: ["CormorantGaramond_500Medium.ttf", "CormorantGaramond_600SemiBold.ttf", "CormorantGaramond_500Medium_Italic.ttf", "CormorantGaramond_600SemiBold_Italic.ttf"] },
+  Raleway: { n: "Raleway", css: "Raleway,'Helvetica Neue',Arial,sans-serif", docx: "Raleway", files: ["Raleway_300Light.ttf", "Raleway_600SemiBold.ttf", "Raleway_300Light.ttf", "Raleway_600SemiBold.ttf"] },
+};
+/* group: book = typeset book, ms = manuscript for submission */
+const TPL = {
+  klasicka: { g: "book", n: "Klasická", d: "Nadčasová knižná sadzba. Názov kapitoly na stred, prvé slová kapitálkami, v záhlaví názov kapitoly.", body: "Literata", head: null, opener: "smallcaps", sb: "* * *", def: { headTop: .1, folio: "center" } },
+  kronika: { g: "book", n: "Kronika", d: "Pre fantasy. Rímske číslice a nadpisy písmom Cinzel, ornamenty a veľká iniciála v tmavočervenej.", body: "EBGaramond", head: "Cinzel", opener: "initial", accent: "#7B2D26", sb: "orn", def: { headTop: .08, folio: "center" } },
+  elegantna: { g: "book", n: "Elegantná", d: "Jemná kurzíva Cormorant, tenké linky, čísla strán na vonkajšom okraji.", body: "EBGaramond", head: "Cormorant", opener: "firstword", sb: "· · ·", def: { headTop: .1, folio: "outer" } },
+  moderna: { g: "book", n: "Moderná", d: "Zarovnané doľava, veľké číslo kapitoly, bezpätkové nadpisy a odseky oddelené medzerou.", body: "Literata", head: "Raleway", opener: null, sb: "dia", def: { headTop: .06, folio: "outer", indent: 0, gap: 5.5 } },
+  rukopis: { g: "ms", n: "Rukopis (štandard)", d: "Všeobecný rukopisný formát: A4, 12 bodov, dvojité riadkovanie, priezvisko, názov a strana v záhlaví.", body: "Literata", sb: "#", lang: "sk", tp: "shunn", hdr: "sur/TITLE/pg", def: { headTop: .22, folio: "none", indent: 3, indentFirst: true }, preset: { size: "A4", font: "Literata", fs: 12, lh: 2, align: "left", margins: "wide", toc: false, runhead: true, numbering: "word" } },
+  ms_sk: { g: "ms", n: "Rukopis SK / CZ", d: "Bežné požiadavky slovenských a českých vydavateľstiev: A4, Times New Roman 12, riadkovanie 1,5, okraje 2,5 cm. Na titulnej strane rozsah v normostranách.", body: "Tinos", sb: "* * *", lang: "sk", tp: "sk", hdr: "Author – Title", def: { headTop: .12, folio: "center", indent: 2.9, indentFirst: false }, preset: { size: "A4", font: "Tinos", fs: 12, lh: 1.5, align: "left", margins: "ms25", toc: false, runhead: true, numbering: "num", quotes: "text" } },
+  ms_us: { g: "ms", n: "US – Shunn", d: "Americký „Proper Manuscript Format“ (William Shunn): US Letter, Courier 12, dvojité riadkovanie, okraje 1 palec, Surname / TITLE / strana, kapitola od tretiny strany, # medzi scénami, THE END.", body: "CourierPrime", sb: "#", lang: "en", tp: "shunn", hdr: "sur/TITLE/pg", end: "THE END", def: { headTop: .3, folio: "none", indent: 3, indentFirst: true }, preset: { size: "Letter", font: "CourierPrime", fs: 12, lh: 2, align: "left", margins: "ms1in", toc: false, runhead: true, numbering: "word", quotes: "us" } },
+  ms_uk: { g: "ms", n: "UK – agent", d: "Britské agentúry: A4, Times New Roman 12, dvojité riadkovanie (niektoré prijmú 1,5), okraje 2,5 cm, názov a priezvisko v záhlaví, číslo strany dole.", body: "Tinos", sb: "*", lang: "en", tp: "uk", hdr: "TITLE / Surname", end: "THE END", def: { headTop: .12, folio: "right", indent: 3, indentFirst: false }, preset: { size: "A4", font: "Tinos", fs: 12, lh: 2, align: "left", margins: "ms25", toc: false, runhead: true, numbering: "word", quotes: "gb" } },
+  ms_au: { g: "ms", n: "AU – vydavateľ", d: "Austrálske vydavateľstvá: A4, 12 bodov, riadkovanie 1,5, široké okraje, názov a autor v záhlaví, číslo strany dole. Mnohé chcú aj synopsu.", body: "Tinos", sb: "* * *", lang: "en", tp: "uk", hdr: "Title / Author", end: "THE END", def: { headTop: .12, folio: "center", indent: 3, indentFirst: false }, preset: { size: "A4", font: "Tinos", fs: 12, lh: 1.5, align: "left", margins: "ms25", toc: false, runhead: true, numbering: "word", quotes: "gb" } },
+};
+const BOOK_DEFAULTS = { size: "A5", fs: 10, lh: 1.3, align: "justify", margins: "normal", toc: true, runhead: true, quotes: "text" };
+const DETAIL_KEYS = ["indent", "gap", "indentFirst", "headScale", "headTop", "headAlign", "headFont", "opener", "folio", "recto", "endMark"];
+const SET_KEYS = ["size", "font", "fs", "lh", "align", "margins", "numbering", "sceneBreak", "quotes", "toc", "runhead", ...DETAIL_KEYS];
+const MARGINS = { narrow: [32, 36, 32, 44], normal: [42, 46, 42, 54], wide: [56, 62, 56, 70], ms25: [71, 71, 71, 71], ms1in: [72, 72, 72, 72] };
+const MARGIN_NAMES = [["narrow", "Úzke"], ["normal", "Bežné"], ["wide", "Široké"], ["ms25", "2,5 cm (rukopis)"], ["ms1in", "1 palec (rukopis)"]];
+function pageGeo(e) {
+  const size = PAGE_SIZES[e.size] || PAGE_SIZES.A5, small = size.w < 500, ms = /^ms/.test(e.margins);
+  const sc = ms || small ? 1 : 1.35;
+  const M = (MARGINS[e.margins] || MARGINS.normal).map(v => Math.round(v * sc));
+  return { W: size.w, H: size.h, M, cw: size.w - M[0] - M[2] };
+}
+function tplOf(e) { const t = TPL[e.tpl] || TPL.klasicka; return t.lang && e.tpl !== "rukopis" ? t : Object.assign({}, t, { lang: bookLang() }); }
+function resolveOpts(e, t) {
+  const d = t.def || {}, v = (k, dv) => (e[k] === undefined || e[k] === "tpl" || e[k] === null) ? dv : e[k];
+  const op = v("opener", t.opener || null);
+  return {
+    indent: +v("indent", d.indent ?? 1.4), gap: +v("gap", d.gap ?? 0), indentFirst: !!v("indentFirst", d.indentFirst ?? false),
+    headScale: +v("headScale", 1), headTop: e.headTop === undefined || e.headTop === "tpl" ? (d.headTop ?? .1) : +e.headTop / 100,
+    headAlign: v("headAlign", null), headFont: v("headFont", null), opener: op === "none" ? null : op,
+    folio: v("folio", d.folio || "center"), recto: !!e.recto, endMark: v("endMark", t.end || ""),
+  };
+}
+function sbText(e, t) { const v = e.sceneBreak; return v === undefined || v === "tpl" ? t.sb : v; }
+const EN_N = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const EN_T = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+const enNum = n => n < 20 ? EN_N[n] : n < 100 ? EN_T[Math.floor(n / 10)] + (n % 10 ? "-" + EN_N[n % 10] : "") : String(n);
+function chapNum(n, e, style, lang) {
+  if (e.numbering === "none") return "";
+  if (style === "roman") return roman(n);
+  if (style === "pad") return String(n).padStart(2, "0");
+  if (lang === "en") return e.numbering === "bare" ? String(n) : e.numbering === "num" ? "Chapter " + n : "Chapter " + enNum(n);
+  return chapLabel(n);
+}
+function partName(n, lang) { return lang === "en" ? "Part " + enNum(n) : partLabel(n); }
+const surname = p => ((p.author || "").trim().split(/\s+/).pop() || "Autor");
+function msHeaderText(t, p, pg) {
+  const T = (p.title || "").toUpperCase();
+  if (t.hdr === "sur/TITLE/pg") return surname(p) + " / " + T + " / " + pg;
+  if (t.hdr === "TITLE / Surname") return T + " / " + surname(p);
+  if (t.hdr === "Title / Author") return p.title + " / " + (p.author || "");
+  return (p.author || "") + " – " + p.title;
+}
+function wordsRounded(lang) { const w = totalWords(), r = w < 10000 ? Math.max(100, Math.round(w / 100) * 100) : Math.round(w / 1000) * 1000; return lang === "en" ? "about " + r.toLocaleString("en-US") + " words" : "približne " + nf(r) + " slov"; }
+
+/* ---------- fonts for pdfmake ---------- */
+const fontCache = {};
+async function ensureFont(key) {
+  if (fontCache[key]) return fontCache[key];
+  const f = FONTS[key] || FONTS.Literata;
+  try {
+    const datas = await Promise.all([...new Set(f.files)].map(async fn => { if (window.EMBED_FONTS && EMBED_FONTS[fn]) return [fn, EMBED_FONTS[fn]]; const r = await fetch("fonts/" + fn); if (!r.ok) throw new Error(r.status); return [fn, await blobToB64(await r.blob())]; }));
+    pdfMake.vfs = pdfMake.vfs || {};
+    datas.forEach(([fn, b]) => pdfMake.vfs[fn] = b);
+    pdfMake.fonts = Object.assign(pdfMake.fonts || {}, { [key]: { normal: f.files[0], bold: f.files[1], italics: f.files[2], bolditalics: f.files[3] } });
+    return fontCache[key] = key;
+  } catch (err) {
+    console.warn("font", err);
+    if (!pdfMake.vfs || !pdfMake.vfs["Roboto-Regular.ttf"]) await loadScript(PDFVFS);
+    pdfMake.fonts = Object.assign(pdfMake.fonts || {}, { Roboto: { normal: "Roboto-Regular.ttf", bold: "Roboto-Medium.ttf", italics: "Roboto-Italic.ttf", bolditalics: "Roboto-MediumItalic.ttf" } });
+    toast("Písmo sa nenačítalo, použijem náhradné.");
+    return fontCache[key] = "Roboto";
+  }
+}
+
+/* ---------- pdf building blocks ---------- */
+const centered = (node, w) => ({ _c: true, columns: [{ width: "*", text: "" }, Object.assign({ width: w }, node), { width: "*", text: "" }], columnGap: 0 });
+const pdfRule = (w, c, lw = .5, center = true) => { const n = { canvas: [{ type: "line", x1: 0, y1: 0, x2: w, y2: 0, lineWidth: lw, lineColor: c }] }; return center ? centered(n, w) : n; };
+const pdfOrn = (w, c) => centered({ canvas: [
+  { type: "line", x1: 0, y1: 4, x2: w / 2 - 8, y2: 4, lineWidth: .6, lineColor: c },
+  { type: "polyline", points: [{ x: w / 2 - 4.5, y: 4 }, { x: w / 2, y: -.5 }, { x: w / 2 + 4.5, y: 4 }, { x: w / 2, y: 8.5 }], closePath: true, color: c },
+  { type: "line", x1: w / 2 + 8, y1: 4, x2: w, y2: 4, lineWidth: .6, lineColor: c }] }, w);
+const pdfDiamonds = (c, n = 3, s = 2.6, gap = 12) => { const w = (n - 1) * gap + s * 2; return centered({ canvas: Array.from({ length: n }, (_, i) => { const x = s + i * gap; return { type: "polyline", points: [{ x: x - s, y: s }, { x, y: 0 }, { x: x + s, y: s }, { x, y: s * 2 }], closePath: true, color: c }; }) }, w); };
+function applyOpener(node, kind, c) {
+  if (!node || !Array.isArray(node.text) || !kind) return;
+  const full = node.text.map(r => r.text).join("");
+  const m = kind === "firstword" ? full.match(/^\s*\S+/) : full.match(/^\s*\S+(\s+\S+){0,3}/);
+  let capLen = m ? m[0].length : 0; if (capLen > 32) { const cut = full.slice(0, 32).lastIndexOf(" "); capLen = cut > 0 ? cut : 32; }
+  let initLen = 0; if (kind === "initial") { const mi = full.match(/^[„"‚'«»(\[—–-]*\p{L}/u); initLen = mi ? mi[0].length : 0; }
+  const out = []; let pos = 0;
+  for (const r of node.text) {
+    const t = r.text; let i = 0;
+    while (i < t.length) {
+      const gp = pos + i; let seg, st;
+      if (gp < initLen) { seg = t.slice(i, i + (initLen - gp)); st = { font: c.headKey, fontSize: c.fs * 2.9, lineHeight: (+c.e.lh || 1.3) * .62, color: c.accent || c.ink }; }
+      else if (gp < capLen) { seg = t.slice(i, i + (capLen - gp)).toUpperCase(); st = { fontSize: c.fs * .8, characterSpacing: .7 }; }
+      else { seg = t.slice(i); st = {}; }
+      out.push(Object.assign({}, r, st, { text: seg })); i += seg.length;
+    }
+    pos += t.length;
+  }
+  node.text = out; node.leadingIndent = 0;
+}
+/* apply heading overrides (font, size, alignment) to a chapter/part block */
+function styleHead(nodes, c) {
+  const o = c.o, visit = n => {
+    if (!n || typeof n !== "object") return n;
+    if (n._c && o.headAlign === "left") { const inner = Object.assign({}, n.columns[1]); delete inner.width; if (n.margin) inner.margin = n.margin; return inner; }
+    if (n.text !== undefined && typeof n.text === "string") {
+      if (o.headFont) n.font = o.headFont;
+      if (n.fontSize && o.headScale !== 1) n.fontSize *= o.headScale;
+      if (o.headAlign) n.alignment = o.headAlign;
+    }
+    return n;
+  };
+  return nodes.filter(Boolean).map(visit);
+}
+const TPDF = {
+  klasicka: {
+    title: c => [{ text: c.p.title, fontSize: c.fs * 2.4, alignment: "center", lineHeight: 1.1, margin: [0, c.H * .24, 0, c.fs * .8] }, c.p.subtitle ? { text: c.p.subtitle, italics: true, fontSize: c.fs * 1.15, alignment: "center" } : null, Object.assign(pdfRule(36, c.gray, .5), { margin: [0, c.fs * 1.4, 0, 0] }), c.p.author ? { text: c.p.author.toUpperCase(), fontSize: c.fs * .95, characterSpacing: 2.5, alignment: "center", margin: [0, c.H * .2, 0, 0] } : null],
+    chapter: (s, c) => [chapNum(s.n, c.e) ? { text: chapNum(s.n, c.e).toUpperCase(), fontSize: c.fs * .78, characterSpacing: 2.2, color: c.gray, alignment: "center", margin: [0, c.ht, 0, c.fs * .7] } : { text: "", margin: [0, c.ht, 0, 0] },
+      { text: s.title, id: "ch" + s.n, tocItem: c.toc, fontSize: c.fs * 1.65, alignment: "center", lineHeight: 1.15 }, Object.assign(pdfRule(28, c.gray, .5), { margin: [0, c.fs * .9, 0, c.fs * 2] })],
+    part: (s, c) => [{ text: partLabel(s.n).toUpperCase(), fontSize: c.fs * .85, characterSpacing: 2.5, color: c.gray, alignment: "center", margin: [0, c.H * .3, 0, c.fs * .8] }, { text: s.title, id: "pt" + s.n, tocItem: c.toc, tocStyle: { bold: true }, fontSize: c.fs * 2, bold: true, alignment: "center" }],
+    header: (pg, i, c) => ({ text: pg % 2 ? i.chapter : c.p.title, italics: true, fontSize: c.fs * .75, color: c.gray, alignment: "center" }),
+    footer: (pg, i, c) => ({ text: String(pg), fontSize: c.fs * .78, color: c.gray }),
+  },
+  kronika: {
+    title: c => [Object.assign(pdfOrn(c.cw * .5, c.accent), { margin: [0, c.H * .2, 0, c.fs * 1.4] }), { text: c.p.title, font: "Cinzel", bold: true, fontSize: c.fs * 2.3, characterSpacing: 1, alignment: "center", lineHeight: 1.15 }, Object.assign(pdfOrn(c.cw * .5, c.accent), { margin: [0, c.fs * 1.2, 0, c.fs] }), c.p.subtitle ? { text: c.p.subtitle, italics: true, fontSize: c.fs * 1.1, alignment: "center" } : null, c.p.author ? { text: c.p.author.toUpperCase(), font: "Cinzel", fontSize: c.fs * .95, characterSpacing: 3, alignment: "center", margin: [0, c.H * .22, 0, 0] } : null],
+    chapter: (s, c) => [{ text: chapNum(s.n, c.e, ["num", "bare"].includes(c.e.numbering) ? "plain" : "roman").replace(/^(Kapitola|Chapter) /, ""), font: "Cinzel", fontSize: c.fs * 2.6, color: c.accent, alignment: "center", margin: [0, c.ht, 0, c.fs * .4] },
+      pdfOrn(c.cw * .42, c.accent), { text: s.title.toUpperCase(), id: "ch" + s.n, tocItem: c.toc, font: "Cinzel", fontSize: c.fs * 1.25, characterSpacing: 1.2, alignment: "center", lineHeight: 1.2, margin: [0, c.fs * .8, 0, c.fs * 2.2] }],
+    part: (s, c) => [{ text: (tlb("Časť") + " " + roman(s.n)).toUpperCase(), font: "Cinzel", fontSize: c.fs * .95, characterSpacing: 3, color: c.accent, alignment: "center", margin: [0, c.H * .27, 0, c.fs * .8] }, pdfOrn(c.cw * .55, c.accent), { text: s.title.toUpperCase(), id: "pt" + s.n, tocItem: c.toc, tocStyle: { bold: true }, font: "Cinzel", bold: true, fontSize: c.fs * 2, alignment: "center", margin: [0, c.fs, 0, c.fs] }, pdfOrn(c.cw * .55, c.accent)],
+    header: (pg, i, c) => ({ text: (pg % 2 ? i.chapter : c.p.title).toUpperCase(), font: "Cinzel", fontSize: c.fs * .62, characterSpacing: 1.6, color: c.gray, alignment: "center" }),
+    footer: (pg, i, c) => ({ text: "–  " + pg + "  –", font: "Cinzel", fontSize: c.fs * .75, color: c.gray }),
+  },
+  elegantna: {
+    title: c => [{ text: c.p.title, font: "Cormorant", italics: true, fontSize: c.fs * 2.9, alignment: "center", lineHeight: 1.05, margin: [0, c.H * .26, 0, c.fs] }, pdfRule(50, c.gray, .4), c.p.subtitle ? { text: c.p.subtitle, font: "Cormorant", italics: true, fontSize: c.fs * 1.3, alignment: "center", margin: [0, c.fs, 0, 0] } : null, c.p.author ? { text: c.p.author.toUpperCase(), font: "Cormorant", fontSize: c.fs * 1.05, characterSpacing: 3, alignment: "center", margin: [0, c.H * .2, 0, 0] } : null],
+    chapter: (s, c) => [chapNum(s.n, c.e) ? { text: chapNum(s.n, c.e), font: "Cormorant", italics: true, fontSize: c.fs * 1.15, color: c.gray, alignment: "center", margin: [0, c.ht, 0, c.fs * .2] } : { text: "", margin: [0, c.ht, 0, 0] },
+      { text: s.title, id: "ch" + s.n, tocItem: c.toc, font: "Cormorant", italics: true, fontSize: c.fs * 2.3, alignment: "center", lineHeight: 1.05, margin: [0, 0, 0, c.fs * .7] }, Object.assign(pdfRule(40, c.gray, .4), { margin: [0, 0, 0, c.fs * 2] })],
+    part: (s, c) => [{ text: partLabel(s.n), font: "Cormorant", italics: true, fontSize: c.fs * 1.3, color: c.gray, alignment: "center", margin: [0, c.H * .3, 0, c.fs * .4] }, { text: s.title, id: "pt" + s.n, tocItem: c.toc, tocStyle: { italics: true }, font: "Cormorant", italics: true, fontSize: c.fs * 2.8, alignment: "center", margin: [0, 0, 0, c.fs] }, pdfRule(50, c.gray, .4)],
+    header: (pg, i, c) => ({ text: pg % 2 ? i.chapter : (c.p.author || c.p.title), font: "Cormorant", italics: true, fontSize: c.fs * .85, color: c.gray, alignment: pg % 2 ? "right" : "left" }),
+    footer: (pg, i, c) => ({ text: String(pg), font: "Cormorant", fontSize: c.fs * .9, color: c.gray }),
+  },
+  moderna: {
+    title: c => [{ text: c.p.title, font: "Raleway", bold: true, fontSize: c.fs * 2.5, lineHeight: 1.05, margin: [0, c.H * .3, 0, c.fs * .8] }, pdfRule(c.cw, c.ink, .8, false), c.p.subtitle ? { text: c.p.subtitle, font: "Raleway", fontSize: c.fs * 1.15, margin: [0, c.fs * .8, 0, 0] } : null, c.p.author ? { text: c.p.author.toUpperCase(), font: "Raleway", bold: true, fontSize: c.fs * .9, characterSpacing: 1.5, margin: [0, c.H * .18, 0, 0] } : null],
+    chapter: (s, c) => [chapNum(s.n, c.e) ? { text: chapNum(s.n, c.e, "pad"), font: "Raleway", fontSize: c.fs * 4.2, color: "#B8B8B8", lineHeight: .95, margin: [0, c.ht, 0, 0] } : { text: "", margin: [0, c.ht, 0, 0] },
+      { text: s.title, id: "ch" + s.n, tocItem: c.toc, font: "Raleway", bold: true, fontSize: c.fs * 1.5, lineHeight: 1.15, margin: [0, c.fs * .3, 0, c.fs * .7] }, Object.assign(pdfRule(c.cw, c.ink, .6, false), { margin: [0, 0, 0, c.fs * 1.8] })],
+    part: (s, c) => [{ text: (tlb("Časť") + " " + s.n).toUpperCase(), font: "Raleway", fontSize: c.fs * .9, characterSpacing: 3, color: c.gray, margin: [0, c.H * .34, 0, c.fs * .5] }, { text: s.title, id: "pt" + s.n, tocItem: c.toc, tocStyle: { bold: true }, font: "Raleway", bold: true, fontSize: c.fs * 2.3, margin: [0, 0, 0, c.fs] }, pdfRule(c.cw * .3, c.ink, .8, false)],
+    header: (pg, i, c) => ({ text: (pg % 2 ? i.chapter : c.p.title).toUpperCase(), font: "Raleway", fontSize: c.fs * .6, characterSpacing: 1.8, color: c.gray, alignment: pg % 2 ? "right" : "left" }),
+    footer: (pg, i, c) => ({ text: String(pg), font: "Raleway", bold: true, fontSize: c.fs * .75, color: c.gray }),
+  },
+  ms: {
+    title: c => {
+      const t = c.t, p = c.p, en = t.lang === "en", contact = (p.contact || "").trim();
+      if (t.tp === "shunn") return [{ columns: [{ text: [p.author || (en ? "Author Name" : "Meno autora"), contact ? "\n" + contact : ""].join(""), lineHeight: 1.15 }, { text: wordsRounded(t.lang), alignment: "right", width: "auto" }] },
+        { text: p.title, alignment: "center", margin: [0, c.H * .28, 0, c.fs * 1.2] }, p.subtitle ? { text: p.subtitle, alignment: "center", margin: [0, 0, 0, c.fs] } : null, { text: (en ? "by " : "") + (p.author || ""), alignment: "center" }];
+      if (t.tp === "sk") return [{ text: p.title, bold: true, fontSize: c.fs * 1.4, alignment: "center", margin: [0, c.H * .26, 0, c.fs * .5] }, p.subtitle ? { text: p.subtitle, italics: true, alignment: "center" } : null, { text: p.author || "", alignment: "center", margin: [0, c.fs, 0, 0] },
+        { table: { widths: ["auto", "*"], body: [[{ text: "Žáner:", bold: true }, p.genre || "—"], [{ text: "Rozsah:", bold: true }, fmtNS(totalChars()) + " normostrán (" + nf(totalWords()) + " slov)"], ...(contact ? [[{ text: "Kontakt:", bold: true }, contact]] : [])] }, layout: "noBorders", lineHeight: 1.2, margin: [c.cw * .15, c.H * .2, 0, 0] }];
+      return [{ text: p.title.toUpperCase(), alignment: "center", bold: true, fontSize: c.fs * 1.3, margin: [0, c.H * .3, 0, c.fs * .6] }, p.subtitle ? { text: p.subtitle, alignment: "center" } : null, { text: "by " + (p.author || ""), alignment: "center", margin: [0, c.fs * .6, 0, 0] },
+        { text: [p.genre ? p.genre + "\n" : "", wordsRounded("en").replace(/^about/, "Approx."), contact ? "\n\n" + contact : ""].join(""), lineHeight: 1.2, margin: [0, c.H * .25, 0, 0] }];
+    },
+    chapter: (s, c) => [{ text: chapNum(s.n, c.e, null, c.t.lang) || " ", alignment: "center", margin: [0, c.ht, 0, 0] }, { text: s.title, id: "ch" + s.n, tocItem: c.toc, alignment: "center", bold: c.t.tp === "sk", margin: [0, 0, 0, c.fs * 2] }],
+    part: (s, c) => [{ text: partName(s.n, c.t.lang), alignment: "center", margin: [0, c.H * .3, 0, 0] }, { text: s.title.toUpperCase(), id: "pt" + s.n, tocItem: c.toc, alignment: "center" }],
+    header: (pg, i, c) => ({ text: msHeaderText(c.t, c.p, pg), fontSize: c.fs * (c.t.hdr === "sur/TITLE/pg" ? 1 : .85), alignment: "right" }),
+    footer: (pg, i, c) => ({ text: String(pg), fontSize: c.fs * .9 }),
+  },
+};
+const tpdfOf = id => TPL[id]?.g === "ms" ? TPDF.ms : (TPDF[id] || TPDF.klasicka);
+function pdfBreak(c) {
+  const v = sbText(c.e, c.t);
+  if (v === "orn") return Object.assign(pdfDiamonds(c.accent || c.gray), { margin: [0, c.fs * .9, 0, c.fs * .9] });
+  if (v === "dia") return Object.assign(pdfDiamonds(c.ink, 1, 2.8), { margin: [0, c.fs * .9, 0, c.fs * .9] });
+  return { text: v || " ", alignment: "center", margin: [0, c.fs * .6, 0, c.fs * .6] };
+}
+function folioAlign(f, pg) { return f === "outer" ? (pg % 2 ? "right" : "left") : f === "right" ? "right" : "center"; }
+
+/* mode: full | text | toc */
+async function buildPdf(mode = "full") {
+  const p = S.p, e = p.exp, t = tplOf(e), T = tpdfOf(e.tpl), o = resolveOpts(e, t), fs = +e.fs || 10, g = pageGeo(e), ms = t.g === "ms";
+  await loadPdfMake();
+  const bodyKey = await ensureFont(FONTS[e.font]?.body ? e.font : t.body);
+  const headWant = o.headFont || t.head;
+  const headKey = headWant ? await ensureFont(headWant) : bodyKey;
+  for (const k of ["Cinzel", "Cormorant", "Raleway"]) if (t.head === k || o.headFont === k) await ensureFont(k);
+  const struct = bookStructure();
+  if (!struct.length) throw new Error("Rukopis je prázdny alebo nie je nič zahrnuté do exportu.");
+  const c = { p: { ...p, title: p.title || tlb("Bez názvu") }, e, t, o, fs, H: g.H, W: g.W, M: g.M, cw: g.cw, ht: g.H * o.headTop, headKey, gray: "#6E6E6E", ink: "#1E1E1E", accent: t.accent, toc: !!e.toc && !ms };
+  const fix = n => { if (n && typeof n === "object") { if (n.font && !pdfMake.fonts[n.font]) n.font = headKey; Object.values(n).forEach(v => { if (Array.isArray(v)) v.forEach(fix); else if (v && typeof v === "object") fix(v); }); } return n; };
+  const withFront = mode === "full";
+  const makeContent = blanks => {
+    const content = [];
+    if (withFront) {
+      content.push({ stack: T.title(c).filter(Boolean) });
+      if (!ms) {
+        const copy = (e.copyright || "").trim() || (p.author ? "© " + new Date().getFullYear() + " " + p.author + "\n" + tlb("Všetky práva vyhradené.") : "");
+        if (copy) content.push({ text: copy, fontSize: fs * .8, color: c.gray, margin: [0, g.H * .55, 0, 0], pageBreak: "before", lineHeight: 1.4 });
+        if ((e.dedication || "").trim()) content.push({ text: e.dedication.trim(), italics: true, alignment: "center", margin: [0, g.H * .25, 0, 0], pageBreak: "before" });
+        if (c.toc) content.push({ toc: { title: { text: tlb(e.tpl === "kronika" ? "OBSAH" : "Obsah"), font: headWant ? headKey : undefined, fontSize: fs * 1.5, bold: e.tpl === "klasicka", italics: e.tpl === "elegantna", alignment: e.tpl === "moderna" ? "left" : "center", margin: [0, g.H * .08, 0, fs * 2] }, textStyle: { fontSize: fs }, numberStyle: { fontSize: fs } }, pageBreak: "before" });
+      }
+    }
+    const hopts = { indent: fs * o.indent, indentFirst: o.indentFirst, gap: o.gap, brk: () => pdfBreak(c) };
+    let firstBlock = !withFront;
+    struct.forEach(s => {
+      const id = (s.type === "part" ? "pt" : "ch") + s.n;
+      if (blanks.has(id)) content.push({ text: " ", pageBreak: "before" });
+      const pb = firstBlock && !blanks.has(id) ? undefined : "before"; firstBlock = false;
+      if (s.type === "part") { content.push({ stack: styleHead(T.part(s, c), c), pageBreak: pb }); return; }
+      content.push({ stack: styleHead(T.chapter(s, c), c), pageBreak: pb });
+      s.texts.forEach((tx, i) => {
+        if (i > 0) content.push(pdfBreak(c));
+        const nodes = htmlToPdf(exportHtml(S.items[tx.id]?.html), fs, hopts);
+        if (i === 0 && o.opener) applyOpener(nodes.find(n => "leadingIndent" in n), o.opener, c);
+        content.push(...nodes);
+      });
+    });
+    if (o.endMark) content.push({ text: o.endMark, alignment: "center", margin: [0, fs * 2.5, 0, 0] });
+    return fix(content);
+  };
+  const makeDD = (starts, blanks, record) => {
+    const pages = Object.entries(starts).map(([id, pg]) => ({ id, pg })).sort((a, b) => a.pg - b.pg);
+    const first = pages.length ? pages[0].pg : 1;
+    const blankPages = new Set([...blanks].map(id => starts[id] - 1));
+    const info = pg => { let ch = c.p.title; for (const s of pages) { if (s.pg > pg) break; if (s.id[0] === "c") ch = struct.find(x => x.type === "chapter" && "ch" + x.n === s.id)?.title || ch; } return { front: pg < first, blank: blankPages.has(pg), opening: pages.some(s => s.pg === pg), part: pages.some(s => s.pg === pg && s.id[0] === "p"), chapter: ch }; };
+    const dd = {
+      pageSize: { width: g.W, height: g.H }, pageMargins: g.M,
+      info: { title: c.p.title, author: p.author || "", creator: "Kronikár" },
+      defaultStyle: { font: bodyKey, fontSize: fs, lineHeight: +e.lh || 1.3, alignment: e.align === "left" ? "left" : "justify", color: c.ink },
+      content: makeContent(blanks),
+      header: pg => {
+        if (record) return null; const i = info(pg);
+        if (i.blank) return null;
+        if (ms) { if (!e.runhead || (withFront && pg === 1)) return null; }
+        else if (!e.runhead || i.front || i.opening) return null;
+        const n = fix(T.header(pg, i, c)); n.margin = [g.M[0], Math.max(10, g.M[1] * .5 - fs * .4), g.M[2], 0]; return n;
+      },
+      footer: pg => {
+        if (record || o.folio === "none") return null; const i = info(pg);
+        if (i.blank || i.part || (withFront && (ms ? pg === 1 : i.front))) return null;
+        const n = T.footer(pg, i, c); if (!n) return null; fix(n); n.alignment = folioAlign(o.folio, pg);
+        n.margin = [g.M[0], Math.max(8, g.M[3] * .5 - fs * .4), g.M[2], 0]; return n;
+      },
+    };
+    if (record) dd.pageBreakBefore = node => { if (node.id && node.startPosition && !(node.id in starts) && /^(ch|pt)\d+$/.test(node.id)) starts[node.id] = node.startPosition.pageNumber; return false; };
+    return dd;
+  };
+  const layout = async (blanks) => { const starts = {}; await new Promise((res, rej) => { try { pdfMake.createPdf(makeDD(starts, blanks, true)).getBuffer(() => res()); } catch (err) { rej(err); } }); return starts; };
+  let blanks = new Set(), starts = await layout(blanks);
+  if (o.recto && mode !== "toc") {
+    for (let pass = 0; pass < 8; pass++) {
+      let changed = false; const nb = new Set(blanks);
+      Object.entries(starts).sort((a, b) => a[1] - b[1]).forEach(([id, pg]) => { if (pg % 2 === 0) { nb.has(id) ? nb.delete(id) : nb.add(id); changed = true; } });
+      if (!changed) break;
+      blanks = nb; starts = await layout(blanks);
+    }
+  }
+  if (mode === "toc") return buildTocPdf(struct, starts, c, bodyKey, headKey);
+  return new Promise((res, rej) => { try { pdfMake.createPdf(makeDD(starts, blanks, false)).getBlob(b => res(b)); } catch (err) { rej(err); } });
+}
+function buildTocPdf(struct, starts, c, bodyKey, headKey) {
+  const fs = c.fs, rows = struct.map(s => {
+    const id = (s.type === "part" ? "pt" : "ch") + s.n, part = s.type === "part", lab = part ? partName(s.n, c.t.lang) : chapNum(s.n, c.e, null, c.t.lang);
+    return [{ text: [lab ? { text: lab + (part ? ": " : " · "), color: c.gray } : "", s.title], bold: part, margin: [part ? 0 : fs, part ? fs * .5 : 0, 0, 0] }, { text: String(starts[id] || ""), alignment: "right", margin: [0, part ? fs * .5 : 0, 0, 0] }];
+  });
+  const g = pageGeo(c.e);
+  const dd = { pageSize: { width: g.W, height: g.H }, pageMargins: g.M, info: { title: c.p.title + " – " + tlb("obsah"), creator: "Kronikár" },
+    defaultStyle: { font: bodyKey, fontSize: fs, lineHeight: 1.35, color: c.ink },
+    content: [{ text: c.t.lang === "en" ? "Contents" : "Obsah", font: headKey, fontSize: fs * 1.6, alignment: "center", margin: [0, g.H * .06, 0, fs * .4] }, { text: c.p.title + (c.p.author ? " · " + c.p.author : ""), alignment: "center", italics: true, color: c.gray, margin: [0, 0, 0, fs * 2] },
+      { table: { widths: ["*", 36], body: rows }, layout: { hLineWidth: () => 0, vLineWidth: () => 0, paddingTop: () => 2, paddingBottom: () => 2 } },
+      { text: tlb("Čísla strán zodpovedajú PDF celej knihy v šablóne „{x}“.").replace("{x}", tlb(c.t.n)), fontSize: fs * .75, color: c.gray, margin: [0, fs * 2, 0, 0] }] };
+  return new Promise((res, rej) => { try { pdfMake.createPdf(dd).getBlob(b => res(b)); } catch (err) { rej(err); } });
+}
+
+/* ---------- book description (logline, blurb, synopsis) ---------- */
+function generateSynopsis() {
+  const out = [];
+  bookStructure().forEach(s => {
+    if (s.type === "part") { out.push(partLabel(s.n) + ": " + s.title); return; }
+    const bits = [s.node && s.node.type === "folder" ? s.node.synopsis : "", ...s.texts.map(t => t.synopsis)].map(x => (x || "").trim()).filter(Boolean);
+    if (bits.length) out.push(bits.join(" "));
+  });
+  return out.join("\n\n");
+}
+function descSections(lang) {
+  const p = S.p, d = p.desc || {}, en = lang === "en";
+  return [["Logline", d.logline], [en ? "Blurb" : "Anotácia", d.blurb], [en ? "Synopsis" : "Synopsa", d.synopsis]].filter(([, v]) => (v || "").trim());
+}
+function descMeta(lang) {
+  const p = S.p, en = lang === "en";
+  return [[en ? "Author" : "Autor", p.author], [en ? "Genre" : "Žáner", p.genre], [en ? "Length" : "Rozsah", en ? totalWords().toLocaleString("en-US") + " words" : nf(totalWords()) + " slov · " + fmtNS(totalChars()) + " normostrán"], [en ? "Contact" : "Kontakt", p.contact]].filter(([, v]) => (v || "").toString().trim());
+}
+async function buildDescPdf() {
+  const p = S.p, e = p.exp, t = tplOf(e), lang = t.lang || "sk";
+  if (!descSections(lang).length) throw new Error("Popis je prázdny – vyplň logline, anotáciu alebo synopsu.");
+  await loadPdfMake();
+  const font = await ensureFont(FONTS[e.font]?.body ? e.font : t.body), fs = 11.5;
+  const content = [{ text: p.title || tlb("Bez názvu"), fontSize: 20, bold: true, margin: [0, 0, 0, 2] }, p.subtitle ? { text: p.subtitle, italics: true, margin: [0, 0, 0, 4] } : null,
+    { table: { widths: ["auto", "*"], body: descMeta(lang).map(([k, v]) => [{ text: k, bold: true, color: "#555555" }, String(v)]) }, layout: "noBorders", margin: [0, 8, 0, 14] }];
+  descSections(lang).forEach(([h, v]) => { content.push({ text: h.toUpperCase(), fontSize: 9.5, characterSpacing: 1.5, bold: true, color: "#555555", margin: [0, 12, 0, 6] }); v.trim().split(/\n\s*\n|\n/).forEach(par => content.push({ text: par.trim(), margin: [0, 0, 0, 6] })); });
+  const dd = { pageSize: "A4", pageMargins: [64, 64, 64, 64], info: { title: p.title + " – " + tlb("popis"), author: p.author || "", creator: "Kronikár" }, defaultStyle: { font, fontSize: fs, lineHeight: 1.4 }, content: content.filter(Boolean),
+    footer: pg => ({ text: String(pg), alignment: "center", fontSize: 9, color: "#777777", margin: [0, 24, 0, 0] }) };
+  return new Promise((res, rej) => { try { pdfMake.createPdf(dd).getBlob(b => res(b)); } catch (err) { rej(err); } });
+}
+
+/* ---------- DOCX (WordprocessingML written by hand, zipped without compression) ---------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = typeof f.data === "string" ? enc.encode(f.data) : f.data, crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, 0, 2], [12, 0x21, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, name.length, 2], [28, 0, 2]].forEach(([o, v, s]) => s === 4 ? h.setUint32(o, v, true) : h.setUint16(o, v, true));
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const cd = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, 0, 2], [14, 0x21, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, name.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, off, 4]].forEach(([o, v, s]) => s === 4 ? cd.setUint32(o, v, true) : cd.setUint16(o, v, true));
+    central.push(new Uint8Array(cd.buffer), name);
+    off += 30 + name.length + data.length;
+  });
+  const cdSize = central.reduce((a, b) => a + b.length, 0), end = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, cdSize, 4], [16, off, 4], [20, 0, 2]].forEach(([o, v, s]) => s === 4 ? end.setUint32(o, v, true) : end.setUint16(o, v, true));
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+const xr = (text, f = {}) => `<w:r><w:rPr>${f.b ? "<w:b/>" : ""}${f.i ? "<w:i/>" : ""}${f.caps ? "<w:caps/>" : ""}${f.sz ? `<w:sz w:val="${Math.round(f.sz * 2)}"/><w:szCs w:val="${Math.round(f.sz * 2)}"/>` : ""}${f.color ? `<w:color w:val="${f.color}"/>` : ""}</w:rPr><w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
+const xp = (runs, pr = {}) => `<w:p><w:pPr>${pr.style ? `<w:pStyle w:val="${pr.style}"/>` : ""}${pr.keep ? "<w:keepNext/>" : ""}${pr.pb ? "<w:pageBreakBefore/>" : ""}${pr.before !== undefined || pr.after !== undefined ? `<w:spacing${pr.before !== undefined ? ` w:before="${Math.round(pr.before)}"` : ""}${pr.after !== undefined ? ` w:after="${Math.round(pr.after)}"` : ""}/>` : ""}${pr.ind !== undefined ? `<w:ind w:firstLine="${Math.round(pr.ind)}"/>` : ""}${pr.jc ? `<w:jc w:val="${pr.jc}"/>` : ""}</w:pPr>${runs}</w:p>`;
+function htmlToDocx(html, o) {
+  const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html"), out = []; let first = true;
+  const runs = (node, st = {}) => [...node.childNodes].map(ch => {
+    if (ch.nodeType === 3) { const t = ch.textContent.replace(/\s+/g, " "); return t ? xr(t, st) : ""; }
+    if (ch.nodeType !== 1) return "";
+    if (ch.tagName === "BR") return "<w:r><w:br/></w:r>";
+    const s2 = Object.assign({}, st); if (/^(B|STRONG)$/.test(ch.tagName)) s2.b = true; if (/^(I|EM)$/.test(ch.tagName)) s2.i = true;
+    return runs(ch, s2);
+  }).join("");
+  [...d.body.firstChild.childNodes].forEach(el => {
+    const txt = el.textContent.trim(); if (!txt) return;
+    if (el.nodeType === 1 && (el.classList.contains("sb") || /^([*#~·•⁂]\s*){1,5}$/.test(txt))) { out.push(o.brk()); first = true; return; }
+    const r = el.nodeType === 3 ? xr(txt) : runs(el);
+    if (el.tagName === "BLOCKQUOTE") { out.push(xp(r, { style: "Quote" })); first = true; return; }
+    if ((el.getAttribute?.("style") || "").includes("center")) { out.push(xp(r, { jc: "center", ind: 0 })); first = true; return; }
+    out.push(xp(r, { style: first && !o.indentFirst ? "BodyFirst" : "Body" })); first = false;
+  });
+  return out;
+}
+function docxPackage(bodyXml, opt) {
+  const { geo, fontName, fs, lh, ind, gap, jc, lang, header, footer, titlePg } = opt, tw = v => Math.round(v * 20);
+  const sect = `<w:sectPr>${header ? '<w:headerReference w:type="default" r:id="rIdH"/>' : ""}${footer ? '<w:footerReference w:type="default" r:id="rIdF"/>' : ""}<w:pgSz w:w="${tw(geo.W)}" w:h="${tw(geo.H)}"/><w:pgMar w:top="${tw(geo.M[1])}" w:right="${tw(geo.M[2])}" w:bottom="${tw(geo.M[3])}" w:left="${tw(geo.M[0])}" w:header="${tw(Math.max(20, geo.M[1] * .45))}" w:footer="${tw(Math.max(20, geo.M[3] * .45))}" w:gutter="0"/>${titlePg ? "<w:titlePg/>" : ""}</w:sectPr>`;
+  const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W_NS}><w:body>${bodyXml}${sect}</w:body></w:document>`;
+  const rpr = `<w:rFonts w:ascii="${fontName}" w:hAnsi="${fontName}" w:cs="${fontName}" w:eastAsia="${fontName}"/><w:sz w:val="${Math.round(fs * 2)}"/><w:szCs w:val="${Math.round(fs * 2)}"/><w:lang w:val="${lang === "en" ? "en-GB" : "sk-SK"}"/>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W_NS}><w:docDefaults><w:rPrDefault><w:rPr>${rpr}</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="${Math.round(lh * 240)}" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
+<w:style w:type="paragraph" w:styleId="Body"><w:name w:val="Body Text"/><w:basedOn w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="${tw(gap)}"/><w:ind w:firstLine="${tw(ind)}"/><w:jc w:val="${jc}"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="BodyFirst"><w:name w:val="First Paragraph"/><w:basedOn w:val="Body"/><w:next w:val="Body"/><w:qFormat/><w:pPr><w:ind w:firstLine="0"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="BodyFirst"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:after="${tw(fs * 2)}"/><w:jc w:val="center"/><w:outlineLvl w:val="0"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="SceneBreak"><w:name w:val="Scene Break"/><w:basedOn w:val="Normal"/><w:next w:val="BodyFirst"/><w:pPr><w:spacing w:before="${tw(fs * .5)}" w:after="${tw(fs * .5)}"/><w:jc w:val="center"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="120" w:after="120"/><w:ind w:left="${tw(fs * 2)}" w:right="${tw(fs * 2)}"/></w:pPr><w:rPr><w:i/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr></w:style>
+<w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr></w:style></w:styles>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${header ? '<Relationship Id="rIdH" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>' : ""}${footer ? '<Relationship Id="rIdF" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' : ""}</Relationships>`;
+  const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${header ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>' : ""}${footer ? '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' : ""}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
+  const p = S.p;
+  const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${esc(p.title)}</dc:title><dc:creator>${esc(p.author || "")}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0, 19)}Z</dcterms:created></cp:coreProperties>`;
+  const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
+  const files = [{ name: "[Content_Types].xml", data: ct }, { name: "_rels/.rels", data: rootRels }, { name: "docProps/core.xml", data: core }, { name: "word/document.xml", data: doc }, { name: "word/styles.xml", data: styles }, { name: "word/_rels/document.xml.rels", data: rels }];
+  if (header) files.push({ name: "word/header1.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${W_NS}>${header}</w:hdr>` });
+  if (footer) files.push({ name: "word/footer1.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${W_NS}>${footer}</w:ftr>` });
+  return zipStore(files);
+}
+const PAGE_FIELD = '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
+async function buildDocx(mode = "full") {
+  const p = S.p, e = p.exp, t = tplOf(e), o = resolveOpts(e, t), g = pageGeo(e), ms = t.g === "ms", lang = t.lang || "sk";
+  const fontName = (FONTS[FONTS[e.font]?.body ? e.font : t.body] || FONTS.Tinos).docx, tw = v => Math.round(v * 20);
+  if (mode === "desc" || mode === "toc") {
+    const body = [];
+    if (mode === "desc") {
+      body.push(xp(xr(p.title || tlb("Bez názvu"), { b: true, sz: 20 }), { after: 60 }));
+      if (p.subtitle) body.push(xp(xr(p.subtitle, { i: true }), { after: 120 }));
+      descMeta(lang).forEach(([k, v]) => body.push(xp(xr(k + ": ", { b: true }) + String(v).split("\n").map((l, i) => (i ? "<w:r><w:br/></w:r>" : "") + xr(l)).join(""), { after: 40 })));
+      descSections(lang).forEach(([h, v]) => { body.push(xp(xr(h.toUpperCase(), { b: true, sz: 10, color: "555555" }), { before: 280, after: 120, keep: true })); v.trim().split(/\n\s*\n|\n/).forEach(par => body.push(xp(xr(par.trim()), { after: 120 }))); });
+    } else {
+      body.push(xp(xr(lang === "en" ? "Contents" : "Obsah", { b: true, sz: 18 }), { jc: "center", after: 120 }));
+      body.push(xp(xr(p.title + (p.author ? " · " + p.author : ""), { i: true }), { jc: "center", after: 360 }));
+      bookStructure().forEach(s => body.push(s.type === "part" ? xp(xr(partName(s.n, lang) + ": " + s.title, { b: true }), { before: 200, after: 60 }) : xp((chapNum(s.n, e, null, lang) ? xr(chapNum(s.n, e, null, lang) + " · ", { color: "666666" }) : "") + xr(s.title), { after: 40 })));
+    }
+    return docxPackage(body.join(""), { geo: { W: 595.28, H: 841.89, M: [72, 72, 72, 72] }, fontName, fs: 11.5, lh: 1.3, ind: 0, gap: 0, jc: "left", lang, header: "", footer: `<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>${PAGE_FIELD}</w:p>`, titlePg: false });
+  }
+  const fs = +e.fs || 12, H = g.H - g.M[1] - g.M[3], body = [];
+  const brk = () => { const v = sbText(e, t); return xp(xr(v === "orn" ? "◆ ◆ ◆" : v === "dia" ? "◆" : (v || " ")), { style: "SceneBreak" }); };
+  const lines = s => s.split("\n").map((l, i) => (i ? "<w:r><w:br/></w:r>" : "") + xr(l)).join("");
+  if (mode === "full") {
+    const contact = (p.contact || "").trim();
+    if (ms && t.tp === "shunn") {
+      body.push(`<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblLook w:val="0000"/></w:tblPr><w:tblGrid><w:gridCol w:w="4500"/><w:gridCol w:w="4500"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr><w:p>${lines((p.author || "") + (contact ? "\n" + contact : ""))}</w:p></w:tc><w:tc><w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr><w:p><w:pPr><w:jc w:val="right"/></w:pPr>${xr(wordsRounded(lang))}</w:p></w:tc></w:tr></w:tbl>`);
+      body.push(xp(xr(p.title), { jc: "center", before: tw(g.H * .28) }));
+      body.push(xp(xr((lang === "en" ? "by " : "") + (p.author || "")), { jc: "center", before: 240 }));
+    } else if (ms && t.tp === "sk") {
+      body.push(xp(xr(p.title, { b: true, sz: fs * 1.4 }), { jc: "center", before: tw(g.H * .26), after: 120 }));
+      if (p.subtitle) body.push(xp(xr(p.subtitle, { i: true }), { jc: "center" }));
+      body.push(xp(xr(p.author || ""), { jc: "center", before: 240, after: tw(g.H * .2) }));
+      [["Žáner", p.genre || "—"], ["Rozsah", fmtNS(totalChars()) + " normostrán (" + nf(totalWords()) + " slov)"], ...(contact ? [["Kontakt", contact]] : [])].forEach(([k, v]) => body.push(xp(xr(k + ": ", { b: true }) + lines(v), { after: 60 })));
+    } else {
+      body.push(xp(xr(ms ? p.title.toUpperCase() : p.title, { b: true, sz: fs * (ms ? 1.3 : 2.2) }), { jc: "center", before: tw(g.H * .28), after: 160 }));
+      if (p.subtitle) body.push(xp(xr(p.subtitle, { i: true }), { jc: "center" }));
+      body.push(xp(xr((ms ? "by " : "") + (p.author || "")), { jc: "center", before: 200 }));
+      if (ms) body.push(xp(lines([p.genre, wordsRounded("en").replace(/^about/, "Approx."), contact].filter(Boolean).join("\n")), { before: tw(g.H * .22) }));
+    }
+  }
+  let firstBlock = mode !== "full";
+  bookStructure().forEach(s => {
+    const pb = !firstBlock; firstBlock = false;
+    if (s.type === "part") { body.push(xp(xr(partName(s.n, lang)), { jc: "center", pb, before: tw(H * .3), keep: true })); body.push(xp(xr(s.title, { b: true, sz: fs * 1.4 }), { style: "Heading1" })); return; }
+    const lab = chapNum(s.n, e, null, lang);
+    body.push(xp(xr(lab || " "), { jc: "center", pb, before: tw(H * o.headTop), keep: true, after: 120 }));
+    body.push(xp(xr(s.title, { b: !ms || t.tp === "sk", sz: ms ? fs : fs * 1.5 }), { style: "Heading1" }));
+    s.texts.forEach((tx, i) => { if (i > 0) body.push(brk()); body.push(...htmlToDocx(exportHtml(S.items[tx.id]?.html), { indentFirst: o.indentFirst, brk })); });
+  });
+  if (o.endMark) body.push(xp(xr(o.endMark), { jc: "center", before: 480 }));
+  const hdrText = ms ? msHeaderText(t, p, "") : p.title;
+  const header = e.runhead ? `<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="${ms ? "right" : "center"}"/></w:pPr>${xr(hdrText, ms ? {} : { i: true })}${ms && t.hdr === "sur/TITLE/pg" ? PAGE_FIELD : ""}</w:p>` : "";
+  const footer = o.folio !== "none" ? `<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="${o.folio === "outer" || o.folio === "right" ? "right" : "center"}"/></w:pPr>${PAGE_FIELD}</w:p>` : "";
+  return docxPackage(body.join(""), { geo: g, fontName, fs, lh: +e.lh || 1.5, ind: fs * o.indent, gap: o.gap, jc: e.align === "left" ? "left" : "both", lang, header, footer, titlePg: mode === "full" });
+}
+
+/* ---------- saved user templates ---------- */
+async function loadUserTpls() { try { S.userTpls = (await Store.get("meta/templates"))?.list || []; } catch { S.userTpls = []; } }
+async function saveUserTpls() {
+  try { await Store.set("meta/templates", { list: S.userTpls }); } catch (e) { console.warn(e); }
+  if (typeof Sync !== "undefined" && Sync.state === "ok") { try { await Sync.write(Sync.dir, "kronikar-sablony.json", JSON.stringify({ format: "kronikar-templates", list: S.userTpls })); } catch (e) { console.warn(e); } }
+}
+function currentSettings() { const e = S.p.exp, s = {}; SET_KEYS.forEach(k => { if (e[k] !== undefined) s[k] = e[k]; }); return clone(s); }
+function applyUserTpl(u) { const e = S.p.exp; DETAIL_KEYS.forEach(k => delete e[k]); Object.assign(e, clone(u.settings)); e.tpl = u.base; e.utpl = u.id; saveProject(); }
+
+/* ---------- live HTML preview (true scale via container query units) ---------- */
+const SAMPLE_PARAS = ["Iskry padali na udupanú hlinu ako zlaté semená, ktoré nikdy nevyklíčia. Ilsa ich sledovala spod privretých viečok a počítala údery otcovho kladiva. Dvadsaťtri. Pri dvadsiatom štvrtom vždy zastal, utrel si čelo a povedal, že železo treba počúvať.", "Dnes nezastal.", "„Otec?“ Zdvihla hlavu od mecha. V dielni páchlo uhlím a niečím ďalším – ostrým, kovovým, ako vzduch pred búrkou. Otec stál nad nákovou so zdvihnutou rukou a hľadel na podkovu, ktorú kul celé ráno.", "Na jej rozžeravenom oblúku sa rozžiarila čiara. Tenká, rovná, a potom sa zalomila do tvaru, ktorý Ilsa nikdy nevidela, a predsa ho poznala. Tak ako človek pozná vlastné meno vyslovené v cudzom jazyku.", "„Nepozeraj sa na to,“ zašepkal otec. Kladivo mu vypadlo z ruky. „Ilsa, nepozeraj sa na to.“", "Ale ona sa už pozerala. A runa sa pozerala na ňu.", "V noci nemohla spať. Kedykoľvek zavrela oči, videla ten zalomený tvar, akoby jej ho niekto vypálil na vnútornú stranu viečok. Vstala, prešla bosá cez studenú kuchyňu a vošla do dielne.", "Podkova ležala tam, kde ju otec nechal. Vychladnutá, obyčajná, sivá. Ilsa ju zdvihla a palcom prešla po mieste, kde predtým žiarila čiara. Nič.", "Potom zobrala z poličky staré dláto a skôr, ako si to stihla rozmyslieť, ho priložila k železu."];
+function previewSample() {
+  const st = S.p ? bookStructure().find(s => s.type === "chapter") : null;
+  let paras = [];
+  if (st) st.texts.forEach(tx => { const d = new DOMParser().parseFromString("<div>" + (exportHtml(S.items[tx.id]?.html) || "") + "</div>", "text/html"); d.body.firstChild.querySelectorAll("p,blockquote").forEach(el => { const t = el.textContent.trim(); if (t && !el.classList.contains("sb") && paras.length < 40) paras.push(t); }); });
+  if (paras.join(" ").length < 900) paras = paras.concat(SAMPLE_PARAS.map(x => tl(x)));
+  return { title: st ? st.title : tl("Kováčova dcéra"), n: st ? st.n : 1, paras };
+}
+function previewPage(tplId, which, o) {
+  const t = tplOf({ tpl: tplId }), e = Object.assign({}, S.p.exp, o.e || {}, { tpl: tplId }), op = resolveOpts(e, t), g = pageGeo(e), u = 100 / g.W, q = v => (v * u).toFixed(3) + "cqw";
+  const fs = +e.fs || 10, ms = t.g === "ms", lang = t.lang || "sk";
+  const bf = FONTS[FONTS[e.font]?.body ? e.font : t.body].css, hk = op.headFont || t.head, hf = hk ? FONTS[hk].css : bf;
+  const sm = o.sample, accent = t.accent || "#1E1E1E", ht = g.H * op.headTop, al = op.headAlign, ctr = al || "center";
+  const orn = (w, col) => `<svg viewBox="0 0 ${w} 9" style="width:${q(w)};height:${q(9)};display:block;margin:${al === "left" ? "0" : "0 auto"}" aria-hidden="true"><line x1="0" y1="4.5" x2="${w / 2 - 8}" y2="4.5" stroke="${col}" stroke-width=".6"/><path d="M${w / 2 - 4.5} 4.5 L${w / 2} 0 L${w / 2 + 4.5} 4.5 L${w / 2} 9Z" fill="${col}"/><line x1="${w / 2 + 8}" y1="4.5" x2="${w}" y2="4.5" stroke="${col}" stroke-width=".6"/></svg>`;
+  const rule = (w, col, lw, left) => `<div style="width:${q(w)};border-top:${Math.max(.5, lw)}px solid ${col};margin:${left || al === "left" ? "0" : "0 auto"}"></div>`;
+  const lab = chapNum(sm.n, e, null, lang);
+  let head = "";
+  if (which === "open") {
+    const hs = `font-size:${op.headScale}em;text-align:${ctr}`;
+    if (tplId === "klasicka") head = `<div style="padding-top:${q(ht)};${hs};font-family:${op.headFont ? hf : "inherit"}">${lab ? `<div style="font-size:.78em;letter-spacing:.28em;color:#6e6e6e;margin-bottom:.7em">${esc(lab.toUpperCase())}</div>` : ""}<div style="font-size:1.65em;line-height:1.15">${esc(sm.title)}</div><div style="margin:.9em 0 2em">${rule(28, "#6e6e6e", .5)}</div></div>`;
+    else if (tplId === "kronika") head = `<div style="padding-top:${q(ht)};${hs}"><div style="font-family:${hf};font-size:2.6em;color:${accent};line-height:1.2">${e.numbering === "none" ? "" : ["num", "bare"].includes(e.numbering) ? sm.n : roman(sm.n)}</div><div style="margin:.3em 0 .8em">${orn(g.cw * .42, accent)}</div><div style="font-family:${hf};font-size:1.25em;letter-spacing:.1em;line-height:1.2;margin-bottom:2.2em">${esc(sm.title.toUpperCase())}</div></div>`;
+    else if (tplId === "elegantna") head = `<div style="padding-top:${q(ht)};${hs};font-family:${hf}">${lab ? `<div style="font-style:italic;font-size:1.15em;color:#6e6e6e">${esc(lab)}</div>` : ""}<div style="font-style:italic;font-size:2.3em;line-height:1.05;margin-bottom:.3em">${esc(sm.title)}</div>${rule(40, "#6e6e6e", .4)}<div style="height:2em"></div></div>`;
+    else if (tplId === "moderna") head = `<div style="padding-top:${q(ht)};font-family:${hf};font-size:${op.headScale}em;text-align:${al || "left"}">${lab ? `<div style="font-size:4.2em;font-weight:300;color:#b8b8b8;line-height:.95">${String(sm.n).padStart(2, "0")}</div>` : ""}<div style="font-weight:600;font-size:1.5em;line-height:1.15;margin:.2em 0 .5em">${esc(sm.title)}</div>${rule(g.cw, "#1e1e1e", .6, true)}<div style="height:1.8em"></div></div>`;
+    else head = `<div style="padding-top:${q(ht)};${hs};font-family:${op.headFont ? hf : "inherit"}">${esc(lab || "")}<br><span style="font-weight:${t.tp === "sk" ? 700 : 400}">${esc(sm.title)}</span><div style="height:2em"></div></div>`;
+  }
+  const paras = which === "open" ? sm.paras.slice(0, 12) : sm.paras.slice(3).concat(sm.paras);
+  const v = sbText(e, t), brkHtml = v === "orn" ? `<div class="pv-sb" style="color:${accent}">◆&ensp;◆&ensp;◆</div>` : v === "dia" ? `<div class="pv-sb">◆</div>` : `<div class="pv-sb">${esc(v || " ")}</div>`;
+  let body = "";
+  paras.forEach((tx, i) => {
+    let h = esc(tx);
+    if (which === "open" && i === 0 && op.opener) {
+      const m = op.opener === "firstword" ? tx.match(/^\S+/) : tx.match(/^\S+(\s+\S+){0,3}/); let cl = m ? m[0].length : 0, init = "", rest = tx;
+      if (op.opener === "initial") { const mi = tx.match(/^[„"‚'«»(\[—–-]*\p{L}/u); if (mi) { init = `<span style="font-family:${hf};font-size:2.9em;line-height:.8;color:${accent}">${esc(mi[0])}</span>`; rest = tx.slice(mi[0].length); cl -= mi[0].length; } }
+      h = init + `<span style="font-size:.8em;letter-spacing:.07em">${esc(rest.slice(0, cl).toUpperCase())}</span>` + esc(rest.slice(cl));
+    }
+    if (which === "body" && i === 4) body += brkHtml;
+    const first = i === 0 || (which === "body" && i === 4);
+    body += `<p style="text-indent:${first && !op.indentFirst ? 0 : op.indent}em;margin-bottom:${q(op.gap)}">${h}</p>`;
+  });
+  const pg = which === "open" ? 5 : 6, odd = pg % 2 === 1;
+  const hdrSample = ms ? msHeaderText(t, S.p, pg) : { klasicka: odd ? sm.title : S.p.title, kronika: (odd ? sm.title : S.p.title).toUpperCase(), elegantna: odd ? sm.title : (S.p.author || S.p.title), moderna: (odd ? sm.title : S.p.title).toUpperCase() }[tplId];
+  const hdrStyle = ms ? `font-size:${t.hdr === "sur/TITLE/pg" ? 1 : .85}em;color:#1e1e1e` : { klasicka: "font-style:italic;font-size:.75em", kronika: `font-family:${hf};font-size:.62em;letter-spacing:.16em`, elegantna: `font-family:${hf};font-style:italic;font-size:.85em`, moderna: `font-family:${hf};font-size:.6em;letter-spacing:.18em` }[tplId];
+  const hdrAlign = ms ? "right" : ["elegantna", "moderna"].includes(tplId) ? (odd ? "right" : "left") : "center";
+  const showHdr = e.runhead && (ms || which === "body");
+  const ftrTxt = op.folio === "none" ? "" : tplId === "kronika" ? "–&nbsp; " + pg + " &nbsp;–" : String(pg);
+  const ftrStyle = ms ? "font-size:.9em;color:#1e1e1e" : { klasicka: "font-size:.78em", kronika: `font-family:${hf};font-size:.75em`, elegantna: `font-family:${hf};font-size:.9em`, moderna: `font-family:${hf};font-weight:600;font-size:.75em` }[tplId];
+  return `<div class="pgw"><div class="pg" style="aspect-ratio:${g.W}/${g.H};font-family:${bf};font-size:${q(fs)};line-height:${+e.lh || 1.3};text-align:${e.align === "left" ? "left" : "justify"}">
+    ${showHdr ? `<div class="pv-hf" style="top:${q(Math.max(10, g.M[1] * .5 - fs * .4))};left:${q(g.M[0])};right:${q(g.M[2])};text-align:${hdrAlign};${hdrStyle}">${esc(hdrSample)}</div>` : ""}
+    <div class="pv-c" style="top:${q(g.M[1])};left:${q(g.M[0])};right:${q(g.M[2])};height:${q(g.H - g.M[1] - g.M[3])}">${head}${body}</div>
+    ${ftrTxt ? `<div class="pv-hf" style="bottom:${q(Math.max(6, g.M[3] * .5 - fs * 1.2))};left:${q(g.M[0])};right:${q(g.M[2])};text-align:${folioAlign(op.folio, pg)};${ftrStyle}">${ftrTxt}</div>` : ""}
+  </div></div>`;
+}
+
+function applyTemplate(id) {
+  const e = S.p.exp, prev = TPL[e.tpl] || TPL.klasicka, t = TPL[id];
+  DETAIL_KEYS.forEach(k => delete e[k]);
+  if (prev.preset && !t.preset) Object.assign(e, BOOK_DEFAULTS, { numbering: "word" });
+  if (t.preset) Object.assign(e, t.preset);
+  e.tpl = id; e.font = t.body; e.sceneBreak = "tpl"; delete e.utpl;
+  saveProject();
+}
+
+/* ---------- export screen ---------- */
+function renderExport(main) {
+  const p = S.p, e = p.exp;
+  if (!TPL[e.tpl]) { e.tpl = "klasicka"; if (e.runhead === undefined) e.runhead = true; }
+  if (e.sceneBreak === undefined) e.sceneBreak = "tpl";
+  p.desc = p.desc || {};
+  const t = tplOf(e), o = resolveOpts(e, t), struct = bookStructure(), sm = previewSample(), ms = t.g === "ms";
+  const words = struct.reduce((a, s) => a + (s.texts || []).reduce((b, x) => b + (x.words || 0), 0), 0);
+  const chars = struct.reduce((a, s) => a + (s.texts || []).reduce((b, x) => b + nodeChars(x), 0), 0);
+  const g = pageGeo(e), lines = (g.H - g.M[1] - g.M[3]) / ((+e.fs || 10) * (+e.lh || 1.3) * 1.17), cpl = g.cw / ((+e.fs || 10) * (e.font === "CourierPrime" ? .6 : .47));
+  const pages = Math.round(chars / (lines * cpl * .93) * (1 + (+o.gap || 0) / ((+e.fs || 10) * (+e.lh || 1.3)) * .3)) + struct.length + (ms ? 1 : 4);
+  const sel = (id, opts, val) => `<select class="inp" id="${id}">${opts.map(([v, n]) => `<option value="${esc(v)}"${String(v) === String(val) ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+  const tv = (k, dflt = "tpl") => e[k] === undefined ? dflt : e[k];
+  const card = (id, x, user) => `<button class="tpl${(user ? e.utpl === user.id : !e.utpl && e.tpl === id) ? " on" : ""}" ${user ? `data-utpl="${user.id}"` : `data-tpl="${id}"`}><div class="mini">${previewPage(id, "open", { sample: sm, e: user ? user.settings : (x.preset || (TPL[e.tpl]?.preset ? BOOK_DEFAULTS : {})) })}</div><b>${esc(user ? user.name : x.n)}</b>${user ? `<span class="hint">vlastná · ${esc(TPL[user.base]?.n || "")}</span>` : ""}</button>`;
+  const uconf = S.confirm && S.confirm.type === "utpl";
+  const userCur = (S.userTpls || []).find(u => u.id === e.utpl);
+  main.innerHTML = `<div class="export" style="flex:1"><div class="export-in">
+    <div style="display:flex;flex-direction:column;gap:20px;min-width:0">
+    <div class="card"><h3>Šablóna</h3>
+      <span class="lbl">Tlačená kniha</span>
+      <div class="tpl-grid">${Object.entries(TPL).filter(([, x]) => x.g === "book").map(([id, x]) => card(id, x)).join("")}</div>
+      <span class="lbl" style="margin-top:4px">Rukopis pre vydavateľstvo / agenta</span>
+      <div class="tpl-grid">${Object.entries(TPL).filter(([, x]) => x.g === "ms").map(([id, x]) => card(id, x)).join("")}</div>
+      ${(S.userTpls || []).length ? `<span class="lbl" style="margin-top:4px">Moje šablóny</span><div class="tpl-grid">${S.userTpls.map(u => card(u.base, TPL[u.base], u)).join("")}</div>` : ""}
+      <p class="hint" style="margin:0">${userCur ? `<b>${esc(userCur.name)}</b> – vlastná šablóna založená na „${esc(t.n)}“. ` : ""}${esc(t.d)}${ms ? " Požiadavky sa líšia – vždy si over pokyny konkrétneho vydavateľstva či agentúry." : ""}</p>
+    </div>
+    <div class="card"><h3>Kniha</h3>
+      <div class="fgrid">
+        <label class="field"><span>Názov</span><input class="inp" id="xTitle" value="${esc(p.title)}"></label>
+        <label class="field"><span>Podtitul</span><input class="inp" id="xSub" value="${esc(p.subtitle || "")}" placeholder="voliteľné"></label>
+        <label class="field"><span>Jazyk knihy</span><select class="inp" id="xLang"><option value="sk"${bookLang() === "sk" ? " selected" : ""}>Slovenčina</option><option value="en"${bookLang() === "en" ? " selected" : ""}>English</option></select></label>
+        <label class="field"><span>Autor</span><input class="inp" id="xAuthor" value="${esc(p.author || "")}"></label>
+        <label class="field"><span>Žáner</span><input class="inp" id="xGenre" value="${esc(p.genre || "")}" placeholder="napr. epická fantasy"></label>
+      </div>
+      <label class="field"><span>Kontakt na autora (titulná strana rukopisu a popis)</span><textarea class="inp" id="xContact" rows="2" placeholder="E-mail, telefón, prípadne adresa alebo agent">${esc(p.contact || "")}</textarea></label>
+    </div>
+    <div class="card"><h3>Sadzba</h3>
+      <div class="fgrid">
+        <label class="field"><span>Formát strany</span>${sel("xSize", Object.entries(PAGE_SIZES).map(([k, v]) => [k, v.n]), e.size)}</label>
+        <label class="field"><span>Písmo textu</span>${sel("xFont", Object.entries(FONTS).filter(([, v]) => v.body).map(([k, v]) => [k, v.n + (k === t.body ? " ✓" : "")]), FONTS[e.font]?.body ? e.font : t.body)}</label>
+        <label class="field"><span>Veľkosť písma (pt)</span>${sel("xFs", [8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 13].map(v => [v, String(v).replace(".", ",")]), e.fs)}</label>
+        <label class="field"><span>Riadkovanie</span>${sel("xLh", [[1, "1 – jednoduché"], [1.15, "1,15"], [1.25, "1,25"], [1.3, "1,3 – knižné"], [1.4, "1,4"], [1.5, "1,5 – rukopis SK"], [1.55, "1,55"], [1.8, "1,8"], [2, "2 – dvojité"]], e.lh)}</label>
+        <label class="field"><span>Okraje strany</span>${sel("xMar", MARGIN_NAMES, e.margins || "normal")}</label>
+        <label class="field"><span>Zarovnanie textu</span>${sel("xAlign", [["justify", "Do bloku"], ["left", "Doľava"]], e.align || "justify")}</label>
+        <label class="field"><span>Číslovanie kapitol</span>${sel("xNum", [["word", ms && t.lang === "en" ? "Chapter One" : "Prvá kapitola"], ["num", ms && t.lang === "en" ? "Chapter 1" : "Kapitola 1"], ["bare", "1"], ["none", "Bez čísla"]], e.numbering)}</label>
+        <label class="field"><span>Úvodzovky v exporte</span>${sel("xQuotes", [["text", "Ako v texte (" + QUOTE_STYLES[quoteStyle()].n.split("  ")[0] + ")"], ...Object.entries(QUOTE_STYLES).filter(([k]) => k !== "none").map(([k, v]) => [k, v.n])], e.quotes || "text")}</label>
+        <label class="field"><span>Oddeľovač scén</span>${sel("xSb", [["tpl", "Podľa šablóny"], ["* * *", "* * *"], ["*", "*"], ["#", "#"], ["⁂", "⁂"], ["~", "~"], ["", "Prázdny riadok"]], e.sceneBreak ?? "tpl")}</label>
+      </div>
+      <label class="chk"><input type="checkbox" id="xRun"${e.runhead ? " checked" : ""}> Záhlavie (${ms ? "meno, názov a strana hore" : "názov knihy a kapitoly hore na strane"})</label>
+      ${ms ? "" : `<label class="chk"><input type="checkbox" id="xToc"${e.toc ? " checked" : ""}> Obsah na začiatku knihy</label>`}
+      <details class="det" id="detSet"${S.detOpen ? " open" : ""}><summary>Podrobná sadzba a vlastné šablóny</summary>
+        <div class="fgrid">
+          <label class="field"><span>Odsadenie prvého riadku</span>${sel("dIndent", [["tpl", "Podľa šablóny (" + String(o.indent).replace(".", ",") + " em)"], ...[0, .5, 1, 1.25, 1.5, 2, 2.5, 3].map(v => [v, v ? String(v).replace(".", ",") + " em" : "Bez odsadenia"])], tv("indent"))}</label>
+          <label class="field"><span>Medzera medzi odsekmi</span>${sel("dGap", [["tpl", "Podľa šablóny (" + String(o.gap).replace(".", ",") + " pt)"], ...[0, 2, 3, 4, 6, 8, 10, 12].map(v => [v, v ? v + " pt" : "Žiadna"])], tv("gap"))}</label>
+          <label class="field"><span>Úvod kapitoly</span>${sel("dOpener", [["tpl", "Podľa šablóny"], ["none", "Bez zvýraznenia"], ["smallcaps", "Prvé slová kapitálkami"], ["firstword", "Prvé slovo kapitálkami"], ["initial", "Veľká iniciála"]], tv("opener"))}</label>
+          <label class="field"><span>Písmo nadpisov</span>${sel("dHeadFont", [["tpl", "Podľa šablóny"], ...Object.entries(FONTS).map(([k, v]) => [k, v.n])], tv("headFont"))}</label>
+          <label class="field"><span>Veľkosť nadpisov</span>${sel("dHeadScale", [["tpl", "Podľa šablóny"], [.8, "80 %"], [.9, "90 %"], [1.15, "115 %"], [1.3, "130 %"], [1.5, "150 %"]], tv("headScale"))}</label>
+          <label class="field"><span>Zarovnanie nadpisov</span>${sel("dHeadAlign", [["tpl", "Podľa šablóny"], ["center", "Na stred"], ["left", "Doľava"]], tv("headAlign"))}</label>
+          <label class="field"><span>Odstup nadpisu od vrchu</span>${sel("dHeadTop", [["tpl", "Podľa šablóny (" + Math.round(o.headTop * 100) + " %)"], ...[0, 5, 10, 15, 20, 25, 33].map(v => [v, v + " % výšky strany"])], tv("headTop"))}</label>
+          <label class="field"><span>Čísla strán</span>${sel("dFolio", [["tpl", "Podľa šablóny"], ["center", "Dole na stred"], ["outer", "Dole na vonkajšom okraji"], ["right", "Dole vpravo"], ["none", "Bez čísel"]], tv("folio"))}</label>
+          <label class="field"><span>Na konci textu</span>${sel("dEnd", [["tpl", "Podľa šablóny" + (t.end ? " (" + t.end + ")" : "")], ["", "Nič"], ["KONIEC", "KONIEC"], ["THE END", "THE END"], ["* * *", "* * *"]], tv("endMark"))}</label>
+        </div>
+        <label class="chk"><input type="checkbox" id="dIndentFirst"${o.indentFirst ? " checked" : ""}> Odsadiť aj prvý odsek kapitoly a odsek po oddeľovači scén</label>
+        <label class="chk"><input type="checkbox" id="dRecto"${o.recto ? " checked" : ""}> Kapitoly a časti začínajú vždy na pravej (nepárnej) strane – pre tlač</label>
+        <div class="savetpl">
+          ${userCur ? `<button class="btn sm" id="uUpdate">Uložiť zmeny do „${esc(userCur.name)}“</button>` : ""}
+          <input class="inp" id="uName" placeholder="Názov novej šablóny, napr. Moja fantasy A5" autocomplete="off">
+          <button class="btn sm primary" id="uSave">Uložiť ako šablónu</button>
+          ${userCur ? (uconf ? `<span class="confirm" style="flex-direction:row;align-items:center;padding:4px 8px"><span>Zmazať „${esc(userCur.name)}“?</span><button class="btn sm danger solid" id="uDelYes">Zmazať</button><button class="btn sm" id="uDelNo">Nie</button></span>` : `<button class="btn sm ghost danger" id="uDel">${I.trash}Zmazať šablónu</button>`) : ""}
+        </div>
+        <span class="hint">Uložená šablóna si pamätá všetky nastavenia sadzby a je dostupná vo všetkých projektoch${typeof Sync !== "undefined" && Sync.state === "ok" ? " a ukladá sa aj do tvojho priečinka" : ""}.</span>
+      </details>
+    </div>
+    ${ms ? "" : `<div class="card"><h3>Úvodné strany</h3>
+      <label class="field"><span>Venovanie</span><textarea class="inp" id="xDed" rows="2" placeholder="Napríklad: Pre všetkých, ktorí sa nebáli tmy.">${esc(e.dedication || "")}</textarea></label>
+      <label class="field"><span>Tiráž / copyright</span><textarea class="inp" id="xCopy" rows="2" placeholder="Ak necháš prázdne: © ${new Date().getFullYear()} ${esc(p.author || "Autor")}. Všetky práva vyhradené.">${esc(e.copyright || "")}</textarea></label></div>`}
+    <div class="card"><h3>Popis knihy</h3>
+      <label class="field"><span>Logline – jedna veta</span><input class="inp" id="dsLog" value="${esc(p.desc.logline || "")}" placeholder="Kováčova dcéra objaví zakázanú mágiu, ktorá jej za každú runu vezme jednu spomienku."></label>
+      <label class="field"><span>Anotácia – text na obálku (cca 150 – 250 slov)</span><textarea class="inp" id="dsBlurb" rows="5">${esc(p.desc.blurb || "")}</textarea></label>
+      <label class="field"><span>Synopsa – celý dej vrátane konca (1 – 2 strany)</span><textarea class="inp" id="dsSyn" rows="8">${esc(p.desc.synopsis || "")}</textarea></label>
+      <div class="btnrow">${S.confirm && S.confirm.type === "syn" ? `<span class="confirm" style="flex-direction:row;align-items:center;padding:4px 8px"><span>Prepísať súčasnú synopsu?</span><button class="btn sm danger solid" id="synYes">Prepísať</button><button class="btn sm" id="synNo">Nie</button></span>` : `<button class="btn sm" id="synGen">Vygenerovať synopsu zo synops kapitol a scén</button>`}<span class="hint" id="dsCount"></span></div>
+    </div>
+    </div>
+    <div class="export-side">
+      <div class="card"><h3>Náhľad · ${esc(userCur ? userCur.name : t.n)}<span class="spacer"></span><span class="mono" style="letter-spacing:0;text-transform:none">≈ ${nf(pages)} strán</span></h3>
+        <div class="spread">${previewPage(e.tpl, "open", { sample: sm })}${previewPage(e.tpl, "body", { sample: sm })}</div>
+        <div class="statrow" style="grid-template-columns:repeat(3,1fr)"><div class="stat"><b>${nf(words)}</b><span>slov</span></div><div class="stat"><b>${nf(chars)}</b><span>znakov s medzerami</span></div><div class="stat"><b>${fmtNS(chars)}</b><span>normostrán</span></div></div>
+      </div>
+      <div class="card"><h3>Stiahnuť</h3>
+        <div class="dlrows">
+          <div class="dlrow"><div><b>Celá kniha</b><span>${ms ? "Titulná strana a text" : "Titulná strana, tiráž, venovanie, obsah a text"}</span></div><button class="btn sm primary" data-dl="full-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="full-docx">${I.dl}Word</button></div>
+          <div class="dlrow"><div><b>Len text knihy</b><span>Kapitoly bez úvodných strán – napr. ukážka prvých kapitol</span></div><button class="btn sm" data-dl="text-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="text-docx">${I.dl}Word</button></div>
+          <div class="dlrow"><div><b>Len obsah</b><span>Zoznam častí a kapitol${ms ? "" : " s číslami strán"}</span></div><button class="btn sm" data-dl="toc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="toc-docx">${I.dl}Word</button></div>
+          <div class="dlrow"><div><b>Popis knihy</b><span>Údaje, logline, anotácia a synopsa</span></div><button class="btn sm" data-dl="desc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="desc-docx">${I.dl}Word</button></div>
+          <div class="dlrow"><div><b>Ostatné</b><span>Čistý text a záloha projektu</span></div><button class="btn sm" data-dl="md">${I.dl}Markdown</button><button class="btn sm" data-dl="json">${I.dl}Záloha</button></div>
+        </div>
+        <span class="hint" id="xStatus">Word súbory používajú písmo ${esc((FONTS[FONTS[e.font]?.body ? e.font : t.body] || FONTS.Tinos).docx)}.</span>
+      </div>
+      <div class="card"><h3>Obsah knihy</h3>
+        ${struct.length ? `<div class="toc-prev">${struct.map(s => s.type === "part" ? `<div class="r part"><span class="k">${esc(partName(s.n, t.lang))}: ${esc(s.title)}</span></div>` : `<div class="r"><span class="k">${chapNum(s.n, e, null, t.lang) ? `<span class="muted">${esc(chapNum(s.n, e, null, t.lang))} · </span>` : ""}${esc(s.title)}</span><span class="w">${fmtNS(s.texts.reduce((a, x) => a + nodeChars(x), 0))} NS</span></div>`).join("")}</div>` : '<div class="empty">Nič nie je zahrnuté do exportu.</div>'}
+        <span class="hint">Čo nechceš v knihe, odškrtni v inšpektore („Zahrnúť do exportu“).</span>
+      </div>
+    </div>
+  </div></div>`;
+  const rerender = () => { const y = $(".export").scrollTop; renderExport(main); $(".export").scrollTop = y; };
+  const bind = (id, key, num, rr = true, target = e) => { const el = $(id); if (!el) return; el.addEventListener(/xTitle|xSub|xAuthor|xGenre|xContact|xDed|xCopy/.test(id) ? "input" : "change", ev => {
+    const x = ev.target; let v = x.type === "checkbox" ? x.checked : x.value;
+    if (num && v !== "tpl" && v !== "") v = +v;
+    if (v === "tpl" && DETAIL_KEYS.includes(key)) delete target[key]; else target[key] = v;
+    saveProject();
+    if (key === "title") { const cr = $(".crumb"); if (cr) cr.textContent = "/ " + p.title; }
+    if (rr) rerender();
+  }); };
+  bind("#xTitle", "title", false, false, p); bind("#xSub", "subtitle", false, false, p); bind("#xAuthor", "author", false, false, p); bind("#xGenre", "genre", false, false, p); bind("#xContact", "contact", false, false, p);
+  $("#xLang").onchange = ev => { S.p.lang = ev.target.value; saveProject(); renderExport($("#main")); };
+  bind("#xSize", "size"); bind("#xFont", "font"); bind("#xFs", "fs", true); bind("#xLh", "lh", true); bind("#xMar", "margins"); bind("#xAlign", "align"); bind("#xNum", "numbering"); bind("#xSb", "sceneBreak"); bind("#xQuotes", "quotes");
+  bind("#xToc", "toc"); bind("#xRun", "runhead"); bind("#xDed", "dedication", false, false); bind("#xCopy", "copyright", false, false);
+  bind("#dIndent", "indent", true); bind("#dGap", "gap", true); bind("#dOpener", "opener"); bind("#dHeadFont", "headFont"); bind("#dHeadScale", "headScale", true); bind("#dHeadAlign", "headAlign"); bind("#dHeadTop", "headTop", true); bind("#dFolio", "folio"); bind("#dEnd", "endMark"); bind("#dIndentFirst", "indentFirst"); bind("#dRecto", "recto");
+  $("#detSet").addEventListener("toggle", ev => { S.detOpen = ev.target.open; });
+  $$("[data-tpl]", main).forEach(b => b.onclick = () => { applyTemplate(b.dataset.tpl); rerender(); });
+  $$("[data-utpl]", main).forEach(b => b.onclick = () => { const u = S.userTpls.find(x => x.id === b.dataset.utpl); if (u) { applyUserTpl(u); rerender(); } });
+  $("#uSave").onclick = async () => { const name = $("#uName").value.trim(); if (!name) { toast("Napíš názov šablóny."); $("#uName").focus(); return; } const u = { id: uid("u"), name, base: e.tpl, settings: currentSettings(), created: Date.now() }; S.userTpls = [...(S.userTpls || []), u]; e.utpl = u.id; saveProject(); await saveUserTpls(); toast("Šablóna „" + name + "“ je uložená."); rerender(); };
+  $("#uName").onkeydown = ev => { if (ev.key === "Enter") $("#uSave").click(); };
+  $("#uUpdate")?.addEventListener("click", async () => { userCur.settings = currentSettings(); userCur.base = e.tpl; userCur.updated = Date.now(); await saveUserTpls(); toast("Šablóna „" + userCur.name + "“ je aktualizovaná."); });
+  $("#uDel")?.addEventListener("click", () => { S.confirm = { type: "utpl" }; rerender(); });
+  $("#uDelNo")?.addEventListener("click", () => { S.confirm = null; rerender(); });
+  $("#uDelYes")?.addEventListener("click", async () => { S.userTpls = S.userTpls.filter(x => x.id !== userCur.id); delete e.utpl; S.confirm = null; saveProject(); await saveUserTpls(); toast("Šablóna bola zmazaná."); rerender(); });
+  const dsCount = () => { const w = countWords(p.desc.synopsis || ""), b = countWords(p.desc.blurb || ""); $("#dsCount").textContent = `Anotácia ${nf(b)} slov · synopsa ${nf(w)} slov`; };
+  dsCount();
+  [["#dsLog", "logline"], ["#dsBlurb", "blurb"], ["#dsSyn", "synopsis"]].forEach(([id, k]) => { const el = $(id); if (el.tagName === "TEXTAREA") autoGrow(el); el.oninput = () => { p.desc[k] = el.value; if (el.tagName === "TEXTAREA") autoGrow(el); saveProject(); dsCount(); }; });
+  const doGen = () => { const s = generateSynopsis(); if (!s) { toast("Kapitoly ani scény zatiaľ nemajú synopsy (vyplníš ich v inšpektore)."); return; } p.desc.synopsis = s; S.confirm = null; saveProject(); rerender(); toast("Synopsa je vygenerovaná – uprav ju do súvislého textu."); };
+  $("#synGen")?.addEventListener("click", () => { if ((p.desc.synopsis || "").trim()) { S.confirm = { type: "syn" }; rerender(); } else doGen(); });
+  $("#synYes")?.addEventListener("click", doGen);
+  $("#synNo")?.addEventListener("click", () => { S.confirm = null; rerender(); });
+  $$("[data-dl]", main).forEach(b => b.onclick = async () => {
+    const what = b.dataset.dl, st = $("#xStatus"), base = slug(p.title);
+    if (what === "md") return saveFile(base + ".md", buildMarkdown(), "text/markdown");
+    if (what === "json") return exportBackup(p.id);
+    $$("[data-dl]", main).forEach(x => x.disabled = true); st.textContent = "Pripravujem súbor…";
+    try {
+      const [mode, fmt] = what.split("-"), suffix = { full: "", text: "-text", toc: "-obsah", desc: "-popis" }[mode];
+      if (mode === "desc" && !descSections(t.lang || "sk").length) throw new Error("Popis je prázdny – vyplň logline, anotáciu alebo synopsu.");
+      const blob = fmt === "pdf" ? (mode === "desc" ? await buildDescPdf() : await buildPdf(mode)) : await buildDocx(mode);
+      st.textContent = "Hotovo – " + Math.max(1, Math.round(blob.size / 1024)) + " kB.";
+      await saveFile(base + suffix + (fmt === "pdf" ? ".pdf" : ".docx"), blob, fmt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    } catch (err) { console.error(err); st.textContent = "Nepodarilo sa: " + (err.message || err); }
+    finally { $$("[data-dl]", main).forEach(x => x.disabled = false); }
+  });
+}
+</script>

@@ -1,0 +1,336 @@
+<script>
+/* ================= write mode ================= */
+function renderWrite(main) {
+  main.innerHTML = ` <div class="ws${S.insp ? " show-insp" : ""}${S.inspHidden ? " no-insp" : ""}${S.mobBinder ? " mob-binder" : ""}" id="ws" style="flex:1">
+    <aside class="pane left" aria-label="Rukopis">
+      <div class="pane-head"><span class="lbl">Rukopis</span>
+        <button class="btn icon ghost" data-add="text" title="Nová scéna">${I.doc}</button>
+        <button class="btn icon ghost" data-add="chapter" title="Nová kapitola">${I.folder}</button>
+        <button class="btn icon ghost" data-add="part" title="Nová časť">${I.part}</button></div>
+      <div class="searchbox">${I.search}<input class="inp" id="bq" placeholder="Hľadať v rukopise" value="${esc(S.q)}" autocomplete="off"></div>
+      <div class="binder" id="binder" role="tree"></div>
+      <div class="binder-foot"><button class="btn sm" data-add="text">${I.plus}Scéna</button><button class="btn sm" data-add="chapter">${I.plus}Kapitola</button><button class="btn sm" data-add="part">${I.plus}Časť</button></div>
+    </aside>
+    <main class="pane center" id="center"></main>
+    <aside class="pane right" id="insp" aria-label="Inšpektor"></aside>
+  </div>`;
+  $$("[data-add]", main).forEach(b => b.onclick = () => addNode(b.dataset.add));
+  const bq = $("#bq");
+  bq.oninput = debounce(() => { S.q = bq.value; renderBinder(); }, 150);
+  renderBinder(); renderCenter(); renderInspector();
+}
+function wsClass() { const ws = $("#ws"); if (!ws) return; ws.classList.toggle("show-insp", S.insp); ws.classList.toggle("no-insp", !!S.inspHidden); ws.classList.toggle("mob-binder", S.mobBinder); const b = $("#inspBtn"); if (b) b.setAttribute("aria-pressed", inspVisible()); }
+const wide = () => innerWidth > 1100;
+const inspVisible = () => wide() ? !S.inspHidden : S.insp;
+function toggleInsp(force) { const v = force ?? !inspVisible(); if (wide()) S.inspHidden = !v; else S.insp = v; wsClass(); }
+
+function renderBinder() {
+  const el = $("#binder"); if (!el) return;
+  if (S.q.trim()) {
+    const q = norm(S.q.trim()), hits = [];
+    walk(S.p.binder, n => {
+      const txt = n.type === "text" ? htmlToText(S.items[n.id]?.html) : "";
+      const hay = norm(n.title + " " + (n.synopsis || "") + " " + txt);
+      const at = hay.indexOf(q);
+      if (at >= 0) { let snip = ""; const ti = norm(txt).indexOf(q); if (ti >= 0) snip = txt.slice(Math.max(0, ti - 30), ti + q.length + 40); hits.push({ n, snip }); }
+    });
+    el.innerHTML = hits.length ? hits.map(({ n, snip }) => `<div class="bnode ${n.type === "folder" ? "folder" : ""}${S.sel === n.id ? " sel" : ""}" data-id="${n.id}" style="flex-wrap:wrap">${n.type === "folder" ? I.folder : I.doc}<span class="t">${esc(n.title)}</span>${snip ? `<span class="hint" style="flex-basis:100%;padding-left:20px">…${esc(snip)}…</span>` : ""}</div>`).join("")
+      : `<div class="empty" style="padding:10px">Nič sa nenašlo.</div>`;
+  } else {
+    const row = n => {
+      const folder = n.type === "folder", kids = folder ? (n.children || []) : [];
+      const cls = ["bnode", folder ? "folder" : "", n.kind === "part" ? "part" : "", folder && !n.open ? "closed" : "", S.sel === n.id ? "sel" : "", n.include === false ? "excl" : ""].join(" ");
+      return `<div class="${cls}" data-id="${n.id}" draggable="true" role="treeitem" aria-selected="${S.sel === n.id}" ${folder ? `aria-expanded="${!!n.open}"` : ""}>
+        ${folder ? `<button class="tw" data-tog="${n.id}" aria-label="Rozbaliť">${I.chev}</button>${n.kind === "part" ? I.part : I.folder}` : `<span class="tw"></span>${I.doc}`}
+        <span class="t">${esc(n.title || "Bez názvu")}</span>
+        ${!folder ? `<span class="st" style="background:var(--st-${n.status || "napad"})" title="${STAT[n.status || "napad"].name}"></span>` : ""}
+        ${noteBadge(n.id)}<span class="w" data-w="${n.id}">${nodeWords(n) ? nf(nodeWords(n)) : ""}</span></div>
+        ${folder && n.open && kids.length ? `<div class="bkids" role="group">${kids.map(row).join("")}</div>` : ""}`;
+    };
+    el.innerHTML = S.p.binder.length ? S.p.binder.map(row).join("") : `<div class="empty" style="padding:10px">Rukopis je prázdny. Pridaj prvú kapitolu alebo scénu.</div>`;
+  }
+  $$(".bnode", el).forEach(r => {
+    r.onclick = e => {
+      const tog = e.target.closest("[data-tog]");
+      if (tog) { const f = findNode(tog.dataset.tog); f.n.open = !f.n.open; saveProject(); renderBinder(); return; }
+      select(r.dataset.id);
+    };
+    r.ondragstart = e => { S.drag = r.dataset.id; r.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", r.dataset.id); } catch { } };
+    r.ondragend = () => { S.drag = null; $$(".bnode", el).forEach(x => x.classList.remove("dragging", "drop-before", "drop-after", "drop-into")); };
+    r.ondragover = e => {
+      if (!S.drag || S.drag === r.dataset.id) return;
+      e.preventDefault();
+      const t = findNode(r.dataset.id).n, rect = r.getBoundingClientRect(), y = (e.clientY - rect.top) / rect.height;
+      let z = y < .3 ? "before" : y > .7 ? "after" : (t.type === "folder" ? "into" : (y < .5 ? "before" : "after"));
+      r.classList.remove("drop-before", "drop-after", "drop-into"); r.classList.add("drop-" + z); r.dataset.zone = z;
+    };
+    r.ondragleave = () => r.classList.remove("drop-before", "drop-after", "drop-into");
+    r.ondrop = e => { e.preventDefault(); const z = r.dataset.zone || "after"; r.classList.remove("drop-before", "drop-after", "drop-into"); if (S.drag) moveNode(S.drag, r.dataset.id, z); };
+  });
+}
+function select(id) {
+  flushEditor();
+  S.sel = id; S.confirm = null; S.mobBinder = false; wsClass();
+  $$("#binder .bnode").forEach(r => { r.classList.toggle("sel", r.dataset.id === id); r.setAttribute("aria-selected", r.dataset.id === id); });
+  renderCenter(); renderInspector();
+}
+function moveNode(dragId, targetId, zone) {
+  if (dragId === targetId || isAncestor(dragId, targetId)) { toast("Priečinok nemožno presunúť do seba samého."); return; }
+  const src = findNode(dragId); if (!src) return;
+  src.list.splice(src.i, 1);
+  const tgt = findNode(targetId); if (!tgt) { src.list.splice(src.i, 0, src.n); return; }
+  if (zone === "into") { tgt.n.children = tgt.n.children || []; tgt.n.children.push(src.n); tgt.n.open = true; }
+  else tgt.list.splice(tgt.i + (zone === "after" ? 1 : 0), 0, src.n);
+  saveProject(); renderBinder(); if (S.mode === "write") { renderCenter(); renderInspector(); }
+}
+function addNode(kind, opts = {}) {
+  const sel = S.sel ? findNode(S.sel) : null;
+  let node;
+  if (kind === "text") { node = { id: uid("t"), type: "text", title: opts.title || tl("Nová scéna"), status: "napad", synopsis: "", include: true, words: 0, ents: [] }; S.items[node.id] = { id: node.id, html: "", notes: "" }; saveItem(node.id); }
+  else node = { id: uid("f"), type: "folder", kind, title: kind === "part" ? tl("Nová časť") : tl("Nová kapitola"), open: true, synopsis: "", include: true, children: [] };
+  const into = opts.into ? findNode(opts.into) : null;
+  if (into) into.n.children.push(node);
+  else if (!sel) S.p.binder.push(node);
+  else if (kind === "text") { if (sel.n.type === "folder") { sel.n.children.push(node); sel.n.open = true; } else sel.list.splice(sel.i + 1, 0, node); }
+  else if (kind === "chapter") {
+    if (sel.n.type === "folder" && sel.n.kind === "part") { sel.n.children.push(node); sel.n.open = true; }
+    else if (sel.n.type === "folder") sel.list.splice(sel.i + 1, 0, node);
+    else if (sel.parent && sel.parent.kind === "chapter") { const pp = findNode(sel.parent.id); pp.list.splice(pp.i + 1, 0, node); }
+    else sel.list.splice(sel.i + 1, 0, node);
+  } else { let top = sel; while (top.parent) top = findNode(top.parent.id); S.p.binder.splice(top.i + 1, 0, node); }
+  saveProject(); S.q = ""; const bq = $("#bq"); if (bq) bq.value = "";
+  if (S.mode === "write") { renderBinder(); select(node.id); setTimeout(() => { const t = $("#nodeTitle"); if (t) { t.focus(); t.select(); } }, 30); }
+  return node;
+}
+function deleteNode(id) {
+  const f = findNode(id); if (!f) return;
+  const ids = []; walk([f.n], n => { ids.push(n.id); });
+  f.list.splice(f.i, 1);
+  ids.forEach(x => { if (S.items[x]) { delete S.items[x]; qdel(itemPath(S.p.id, x)); } });
+  S.confirm = null;
+  const next = f.list[f.i] || f.list[f.i - 1] || f.parent || allTexts()[0];
+  S.sel = next ? next.id : null;
+  saveProject(); renderBinder(); renderCenter(); renderInspector(); toast("Zmazané.");
+}
+
+/* ---------- center ---------- */
+let edState = null;
+function flushEditor() { if (edState && edState.dirty) { edState.commit(); } }
+function renderCenter() {
+  const c = $("#center"); if (!c) return;
+  edState = null;
+  const f = S.sel ? findNode(S.sel) : null;
+  if (!f) { c.innerHTML = `<div class="bigempty"><h3>Vyber scénu v rukopise</h3><p>alebo založ novú.</p><button class="btn primary" id="emptyAdd">${I.plus}Nová scéna</button></div>`; $("#emptyAdd").onclick = () => addNode("text"); return; }
+  if (f.n.type === "folder") return renderCork(c, f.n);
+  const n = f.n, it = S.items[n.id] || (S.items[n.id] = { id: n.id, html: "", notes: "" });
+  c.innerHTML = `
+    <div class="edbar" role="toolbar" aria-label="Formátovanie">
+      <button class="btn icon ghost mobonly backbtn" id="mobBinderBtn" title="Rukopis">${I.back}</button>
+      <button class="btn icon ghost" data-cmd="bold" title="Tučné (Ctrl+B)"><b style="font-family:var(--f-display)">B</b></button>
+      <button class="btn icon ghost" data-cmd="italic" title="Kurzíva (Ctrl+I)"><i style="font-family:var(--f-display)">I</i></button>
+      <span class="sep"></span>
+      <button class="btn sm ghost" data-cmd="center" title="Centrovať odsek">Na stred</button>
+      <button class="btn sm ghost" data-cmd="quote" title="Citát / list">Citát</button>
+      <button class="btn sm ghost" data-cmd="break" title="Vložiť oddeľovač scén">* * *</button>
+      <span class="sep"></span>
+      <button class="btn icon ghost" id="focusBtn" title="Režim sústredenia (Esc pre návrat)">${I.focus}</button>
+      <button class="btn icon ghost" id="inspBtn" title="Inšpektor" aria-pressed="${inspVisible()}">${I.panel}</button>
+      <span class="wc mono" id="wc"></span>
+    </div>
+    <div class="edscroll"><article class="page">
+      <input class="page-title" id="nodeTitle" value="${esc(n.title)}" placeholder="Názov scény" aria-label="Názov scény">
+      <div class="editor" id="ed" contenteditable="true" spellcheck="true" lang="${bookLang()}" data-ph="${esc(tl("Začni písať… Prázdny riadok netreba, Enter vytvorí nový odsek."))}" role="textbox" aria-multiline="true"></div>
+    </article></div>`;
+  const ed = $("#ed");
+  ed.innerHTML = it.html || "";
+  try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch { }
+  const updWc = () => { const w = n.words || 0; $("#wc").textContent = nf(w) + " " + plural(w, "slovo", "slová", "slov") + (n.target ? " / " + nf(n.target) : "") + " · " + fmtNS(n.chars || 0) + " NS"; $("#wc").title = nf(n.chars || 0) + " znakov vrátane medzier · 1 normostrana = 1 800 znakov"; };
+  updWc();
+  const save = debounce(() => { saveItem(n.id); saveProject(); }, 700);
+  edState = { dirty: false, commit() { it.html = cleanEditorHtml(ed.innerHTML); n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html); this.dirty = false; save.now(); } };
+  const onInput = debounce(() => {
+    it.html = cleanEditorHtml(ed.innerHTML); n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html); edState.dirty = false;
+    updWc(); updateBinderCounts(n.id); touchDaily(); updateGoals(); save();
+    const st = $("#inspStats"); if (st) st.innerHTML = statsHtml(n);
+  }, 250);
+  ed.addEventListener("input", ev => { if (!ev.inputType || ev.inputType.startsWith("insert")) smartQuote(); edState.dirty = true; if (!ed.firstElementChild && ed.textContent.trim()) { wrapLooseText(ed); } onInput(); });
+  ed.addEventListener("paste", e => {
+    e.preventDefault();
+    const html = e.clipboardData.getData("text/html"), txt = e.clipboardData.getData("text/plain");
+    const clean = html ? sanitizeHtml(html) : txt.split(/\r?\n\s*\r?\n|\r?\n/).filter(x => x.trim()).map(p => "<p>" + esc(p.trim()) + "</p>").join("");
+    document.execCommand("insertHTML", false, clean);
+  });
+  ed.addEventListener("keydown", e => { if (e.key === "Tab") { e.preventDefault(); } });
+  $("#nodeTitle").addEventListener("input", e => { n.title = e.target.value; const r = $(`#binder .bnode[data-id="${n.id}"] .t`); if (r) r.textContent = n.title || "Bez názvu"; saveProject(); });
+  $("#nodeTitle").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); ed.focus(); } });
+  $$("[data-cmd]", c).forEach(b => b.addEventListener("mousedown", e => e.preventDefault()));
+  $$("[data-cmd]", c).forEach(b => b.onclick = () => edCmd(b.dataset.cmd, ed));
+  $("#focusBtn").onclick = () => { document.body.classList.add("focus"); toast("Režim sústredenia – Esc pre návrat"); ed.focus(); };
+  $("#inspBtn").onclick = () => toggleInsp();
+  $("#mobBinderBtn").onclick = () => { S.mobBinder = true; wsClass(); };
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("focus")) document.body.classList.remove("focus"); });
+function wrapLooseText(ed) { const t = ed.innerHTML; ed.innerHTML = "<p>" + t + "</p>"; const r = document.createRange(); r.selectNodeContents(ed.firstChild); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+function edCmd(cmd, ed) {
+  ed.focus();
+  if (cmd === "bold" || cmd === "italic") document.execCommand(cmd);
+  else if (cmd === "break") document.execCommand("insertHTML", false, '<p class="sb">* * *</p><p><br></p>');
+  else {
+    const sel = getSelection(); if (!sel.rangeCount) return;
+    let b = sel.anchorNode; while (b && b.parentNode !== ed) b = b.parentNode;
+    if (!b || b.nodeType !== 1) { document.execCommand("formatBlock", false, cmd === "quote" ? "blockquote" : "p"); }
+    else if (cmd === "quote") { if (b.tagName === "BLOCKQUOTE") document.execCommand("formatBlock", false, "p"); else document.execCommand("formatBlock", false, "blockquote"); }
+    else if (cmd === "center") { b.style.textAlign = b.style.textAlign === "center" ? "" : "center"; if (!b.getAttribute("style")) b.removeAttribute("style"); }
+  }
+  ed.dispatchEvent(new Event("input"));
+}
+function sanitizeHtml(html) {
+  const d = new DOMParser().parseFromString(html, "text/html"), out = [];
+  const inline = node => [...node.childNodes].map(ch => {
+    if (ch.nodeType === 3) return esc(ch.textContent.replace(/\s+/g, " "));
+    if (ch.nodeType !== 1) return "";
+    const t = ch.tagName, st = ch.getAttribute("style") || "", inner = inline(ch);
+    if (t === "BR") return "<br>";
+    if (t === "B" || t === "STRONG" || /font-weight:\s*(bold|[6-9]00)/.test(st)) return "<b>" + inner + "</b>";
+    if (t === "I" || t === "EM" || /font-style:\s*italic/.test(st)) return "<i>" + inner + "</i>";
+    return inner;
+  }).join("");
+  const blocks = "P,DIV,H1,H2,H3,H4,H5,H6,LI,BLOCKQUOTE,PRE,TR";
+  const visit = node => {
+    let buf = "";
+    const pushBuf = () => { if (buf.trim()) out.push("<p>" + buf.trim() + "</p>"); buf = ""; };
+    for (const ch of node.childNodes) {
+      if (ch.nodeType === 1 && blocks.split(",").includes(ch.tagName)) {
+        pushBuf();
+        const hasBlock = [...ch.children].some(x => blocks.split(",").includes(x.tagName));
+        if (hasBlock) visit(ch);
+        else { const s = inline(ch).trim(); if (s) out.push(ch.tagName === "BLOCKQUOTE" ? "<blockquote>" + s + "</blockquote>" : "<p>" + s + "</p>"); }
+      } else if (ch.nodeType === 1 && ["SCRIPT", "STYLE", "META", "TITLE"].includes(ch.tagName)) continue;
+      else buf += ch.nodeType === 3 ? esc(ch.textContent.replace(/\s+/g, " ")) : inline({ childNodes: [ch] });
+    }
+    pushBuf();
+  };
+  visit(d.body);
+  return out.join("");
+}
+function cleanEditorHtml(h) { return h.replace(/<span[^>]*>/g, "").replace(/<\/span>/g, "").replace(/<font[^>]*>|<\/font>/g, "").replace(/ style="(?!text-align: center;?")[^"]*"/g, "").replace(/<p><\/p>/g, ""); }
+function updateBinderCounts(id) {
+  // update the word count of the node and its ancestors in the binder
+  let f = findNode(id);
+  while (f) { const w = $(`#binder [data-w="${f.n.id}"]`); if (w) w.textContent = nodeWords(f.n) ? nf(nodeWords(f.n)) : ""; f = f.parent ? findNode(f.parent.id) : null; }
+}
+
+/* ---------- corkboard ---------- */
+function renderCork(c, n) {
+  const kids = n.children || [];
+  const card = (k, i) => {
+    const t = k.type === "text", st = t ? (k.status || "napad") : null;
+    return `<div class="icard" data-id="${k.id}" draggable="true" tabindex="0" role="button">
+      <span class="stripe" style="background:${t ? `var(--st-${st})` : "var(--accent)"}"></span>
+      <div class="ct"><span class="n">${i + 1}</span>${t ? "" : (k.kind === "part" ? I.part : I.folder)}<span>${esc(k.title || "Bez názvu")}</span></div>
+      <div class="syn${k.synopsis ? "" : " none"}">${esc(k.synopsis || (t ? (htmlToText(S.items[k.id]?.html).slice(0, 180) || "Bez synopsy") : (k.children || []).length + " položiek"))}</div>
+      <div class="meta">${t ? `<span>${STAT[st].name}</span>` : `<span>${k.kind === "part" ? "Časť" : "Kapitola"}</span>`}<span class="spacer"></span><span class="mono">${nf(nodeWords(k))} sl.</span>${k.pov && S.ents[k.pov] ? `<span title="Rozprávač">· ${esc(S.ents[k.pov].name.split(" ")[0])}</span>` : ""}</div>
+    </div>`;
+  };
+  const read = kids.filter(k => k.type === "text").length ? kids.map(k => k.type === "text" ? `<h4>${esc(k.title)}</h4><div class="editor" style="min-height:0">${S.items[k.id]?.html || '<p class="hint">Prázdna scéna</p>'}</div>` : `<h4>${esc(k.title)} (${k.kind === "part" ? "časť" : "kapitola"})</h4>`).join("") : '<p class="empty">Táto zložka zatiaľ nemá žiadne scény.</p>';
+  c.innerHTML = `
+    <div class="edbar"><button class="btn icon ghost backbtn" id="mobBinderBtn" title="Rukopis">${I.back}</button>
+      <div class="seg" style="display:flex;gap:4px"><button class="btn sm" aria-pressed="${S.corkView === "cards"}" data-cv="cards">${I.cards}Nástenka</button><button class="btn sm" aria-pressed="${S.corkView === "read"}" data-cv="read">${I.read}Čítať celé</button></div>
+      <span class="sep"></span><button class="btn icon ghost" id="inspBtn" title="Inšpektor" aria-pressed="${inspVisible()}">${I.panel}</button>
+      <span class="wc mono">${nf(nodeWords(n))} slov · ${kids.length} ${plural(kids.length, "položka", "položky", "položiek")}</span></div>
+    <div class="cork">
+      <div class="cork-head">
+        <div class="row"><select class="inp" id="kindSel" style="width:auto"><option value="chapter"${n.kind !== "part" ? " selected" : ""}>Kapitola</option><option value="part"${n.kind === "part" ? " selected" : ""}>Časť knihy</option></select></div>
+        <input class="page-title" id="nodeTitle" value="${esc(n.title)}" placeholder="Názov" aria-label="Názov">
+        <textarea class="inp" id="folderSyn" rows="2" placeholder="O čom je táto ${n.kind === "part" ? "časť" : "kapitola"}? (synopsa)">${esc(n.synopsis || "")}</textarea>
+      </div>
+      ${S.corkView === "read" ? `<div class="readthrough page">${read}</div>` :
+      `<div class="cards" id="cards">${kids.map(card).join("")}<button class="icard add" id="addCard">${I.plus} ${n.kind === "part" ? "Nová kapitola" : "Nová scéna"}</button></div>`}
+    </div>`;
+  $("#mobBinderBtn").onclick = () => { S.mobBinder = true; wsClass(); };
+  $("#inspBtn").onclick = () => toggleInsp();
+  $$("[data-cv]", c).forEach(b => b.onclick = () => { S.corkView = b.dataset.cv; renderCork(c, n); });
+  $("#kindSel").onchange = e => { n.kind = e.target.value; saveProject(); renderBinder(); renderCork(c, n); };
+  $("#nodeTitle").oninput = e => { n.title = e.target.value; const r = $(`#binder .bnode[data-id="${n.id}"] .t`); if (r) r.textContent = n.title || "Bez názvu"; saveProject(); };
+  const fs = $("#folderSyn"); autoGrow(fs); fs.oninput = () => { n.synopsis = fs.value; autoGrow(fs); saveProject(); };
+  $("#addCard")?.addEventListener("click", () => { if (n.kind === "part") addNode("chapter", { into: n.id }); else addNode("text", { into: n.id }); });
+  $$(".icard[data-id]", c).forEach(el => {
+    el.onclick = () => { const id = el.dataset.id; const f = findNode(id); if (f && f.parent) { f.parent.open = true; renderBinder(); } select(id); };
+    el.onkeydown = e => { if (e.key === "Enter") el.click(); };
+    el.ondragstart = e => { S.drag = el.dataset.id; e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", el.dataset.id); } catch { } };
+    el.ondragover = e => { if (!S.drag || S.drag === el.dataset.id) return; e.preventDefault(); const r = el.getBoundingClientRect(), z = e.clientX < r.left + r.width / 2 ? "before" : "after"; el.classList.remove("drop-before", "drop-after"); el.classList.add("drop-" + z); el.dataset.zone = z; };
+    el.ondragleave = () => el.classList.remove("drop-before", "drop-after");
+    el.ondrop = e => { e.preventDefault(); el.classList.remove("drop-before", "drop-after"); if (S.drag) { const d = S.drag; S.drag = null; moveNode(d, el.dataset.id, el.dataset.zone || "after"); } };
+  });
+}
+
+/* ---------- inspector ---------- */
+function statsHtml(n) {
+  const w = nodeWords(n), chars = nodeChars(n);
+  return `<div class="stat"><b>${nf(w)}</b><span>slov</span></div><div class="stat" title="znaky vrátane medzier"><b>${nf(chars)}</b><span>znakov</span></div><div class="stat" title="1 normostrana = 1 800 znakov vrátane medzier"><b>${fmtNS(chars)}</b><span>normostrán</span></div>`;
+}
+function entOptions(cat, selected, empty = "— nevybrané —") {
+  return `<option value="">${empty}</option>` + entsBy(cat).map(e => `<option value="${e.id}"${e.id === selected ? " selected" : ""}>${esc(e.name)}</option>`).join("");
+}
+function allEntOptions(exclude = []) {
+  return CATS.map(c => { const es = entsBy(c.id).filter(e => !exclude.includes(e.id)); return es.length ? `<optgroup label="${esc(c.name)}">${es.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join("")}</optgroup>` : ""; }).join("");
+}
+function folderOptions(excludeId) {
+  const out = ['<option value="__root">Najvyššia úroveň</option>'];
+  walk(S.p.binder, (n, p, i, d) => { if (n.type === "folder" && n.id !== excludeId && !isAncestor(excludeId, n.id)) out.push(`<option value="${n.id}">${"  ".repeat(d)}${esc(n.title)}</option>`); });
+  return out.join("");
+}
+function renderInspector() {
+  const el = $("#insp"); if (!el) return;
+  const f = S.sel ? findNode(S.sel) : null;
+  if (!f) { el.innerHTML = '<p class="empty">Nič nie je vybrané.</p>'; return; }
+  const n = f.n, t = n.type === "text", it = t ? S.items[n.id] : null;
+  const chips = (n.ents || []).filter(id => S.ents[id]).map(id => { const e = S.ents[id]; return `<span class="chip"><span class="cd" style="background:${catColor(e.cat)}"></span><button class="chipname" data-goent="${id}" style="border:0;background:none;padding:0;cursor:pointer">${esc(e.name)}</button><button class="x" data-rment="${id}" aria-label="Odobrať">×</button></span>`; }).join("");
+  const conf = S.confirm && S.confirm.type === "node" && S.confirm.id === n.id;
+  el.innerHTML = `
+    <div class="insp-sec"><div class="fx"><span class="lbl">${t ? "Scéna" : n.kind === "part" ? "Časť" : "Kapitola"}</span><button class="btn icon ghost" id="inspClose" title="Zavrieť" style="font-size:16px;line-height:1">×</button></div>
+      <div class="statrow" id="inspStats">${statsHtml(n)}</div></div>
+    ${t ? `
+    <div class="insp-sec"><label class="field"><span>Synopsa</span><textarea class="inp" id="iSyn" rows="3" placeholder="Čo sa v scéne stane – zobrazí sa na nástenke.">${esc(n.synopsis || "")}</textarea></label></div>
+    <div class="insp-sec"><span class="lbl">Stav</span><div class="status-pick">${STATUSES.map(s => `<button data-st="${s.id}" class="${(n.status || "napad") === s.id ? "on" : ""}"><i style="background:var(--st-${s.id})"></i>${s.name}</button>`).join("")}</div></div>
+    <div class="insp-sec">
+      <label class="field"><span>Rozprávač (POV)</span><select class="inp" id="iPov">${entOptions("postava", n.pov)}</select></label>
+      <label class="field"><span>Miesto deja</span><select class="inp" id="iPlace">${entOptions("krajina", n.place)}</select></label>
+      <div class="field"><span>Vystupujú / súvisí</span><div class="chips">${chips || '<span class="hint">Zatiaľ nič.</span>'}</div>
+        <select class="inp" id="iAddEnt"><option value="">+ Pridať zo sveta…</option>${allEntOptions(n.ents || [])}</select></div>
+      <label class="field"><span>Cieľ slov pre scénu</span><input class="inp mono" id="iTarget" type="number" min="0" step="100" value="${n.target || ""}" placeholder="napr. 2000"></label>
+    </div>
+    <div class="insp-sec"><label class="field"><span>Poznámky k scéne</span><textarea class="inp" id="iNotes" rows="4" placeholder="Nápady, otázky, čo treba overiť…">${esc(it?.notes || "")}</textarea></label></div>` : ""}
+    <div class="insp-sec" id="iSticky"></div>
+    <div class="insp-sec" data-refcount><span class="lbl">Odkazy <span class="rc mono"></span></span><div id="iRefs"></div></div>
+    <div class="insp-sec">
+      <label class="chk"><input type="checkbox" id="iInc"${n.include !== false ? " checked" : ""}> Zahrnúť do exportu</label>
+      <div class="field"><span>Poradie a umiestnenie</span>
+        <div class="btnrow"><button class="btn sm" id="mvUp">${I.up}Vyššie</button><button class="btn sm" id="mvDown">${I.down}Nižšie</button></div>
+        <select class="inp" id="mvTo"><option value="">Presunúť do…</option>${folderOptions(n.id)}</select></div>
+    </div>
+    <div class="insp-sec">${conf ? `<div class="confirm"><b>Zmazať „${esc(n.title)}“?</b><span>${t ? "Text scény sa natrvalo odstráni." : "Zmaže sa aj všetko, čo obsahuje."}</span><div class="btnrow"><button class="btn sm danger solid" id="delYes">Zmazať</button><button class="btn sm" id="delNo">Ponechať</button></div></div>`
+      : `<button class="btn sm danger" id="delAsk">${I.trash}Zmazať ${t ? "scénu" : n.kind === "part" ? "časť" : "kapitolu"}</button>`}</div>`;
+  $("#inspClose").onclick = () => toggleInsp(false);
+  if (t) {
+    const syn = $("#iSyn"); syn.oninput = () => { n.synopsis = syn.value; saveProject(); };
+    $$("[data-st]", el).forEach(b => b.onclick = () => { n.status = b.dataset.st; saveProject(); renderInspector(); const d = $(`#binder .bnode[data-id="${n.id}"] .st`); if (d) d.style.background = `var(--st-${n.status})`; });
+    $("#iPov").onchange = e => { n.pov = e.target.value || null; saveProject(); };
+    $("#iPlace").onchange = e => { n.place = e.target.value || null; saveProject(); };
+    $("#iAddEnt").onchange = e => { if (!e.target.value) return; n.ents = [...new Set([...(n.ents || []), e.target.value])]; saveProject(); renderInspector(); };
+    $$("[data-rment]", el).forEach(b => b.onclick = () => { n.ents = (n.ents || []).filter(x => x !== b.dataset.rment); saveProject(); renderInspector(); });
+    $$("[data-goent]", el).forEach(b => b.onclick = () => openEnt(b.dataset.goent));
+    $("#iTarget").oninput = e => { n.target = parseInt(e.target.value) || 0; saveProject(); const w = $("#wc"); if (w) w.textContent = nf(n.words || 0) + " slov" + (n.target ? " / " + nf(n.target) : ""); };
+    $("#iNotes").oninput = e => { it.notes = e.target.value; saveItem(n.id); };
+  }
+  mountRefs($("#iRefs"), n, saveProject, true);
+  mountNoteInsp($("#iSticky"), n);
+  $("#iInc").onchange = e => { n.include = e.target.checked; saveProject(); renderBinder(); };
+  $("#mvUp").onclick = () => { const g = findNode(n.id); if (g.i > 0) { g.list.splice(g.i, 1); g.list.splice(g.i - 1, 0, n); saveProject(); renderBinder(); } };
+  $("#mvDown").onclick = () => { const g = findNode(n.id); if (g.i < g.list.length - 1) { g.list.splice(g.i, 1); g.list.splice(g.i + 1, 0, n); saveProject(); renderBinder(); } };
+  $("#mvTo").onchange = e => { const v = e.target.value; if (!v) return; const g = findNode(n.id); g.list.splice(g.i, 1); if (v === "__root") S.p.binder.push(n); else { const tg = findNode(v).n; tg.children.push(n); tg.open = true; } saveProject(); renderBinder(); renderInspector(); toast("Presunuté."); };
+  $("#delAsk")?.addEventListener("click", () => { S.confirm = { type: "node", id: n.id }; renderInspector(); });
+  $("#delNo")?.addEventListener("click", () => { S.confirm = null; renderInspector(); });
+  $("#delYes")?.addEventListener("click", () => deleteNode(n.id));
+}
+</script>

@@ -1,0 +1,212 @@
+<script>
+/* ================= auto-save to a folder on disk (File System Access API) ================= */
+const idb = {
+  db: null,
+  open() { return this.db || (this.db = new Promise((res, rej) => { const r = indexedDB.open("kronikar", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
+  async run(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction("kv", mode), st = tx.objectStore("kv"), r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); }); },
+  get(k) { return this.run("readonly", s => s.get(k)); },
+  set(k, v) { return this.run("readwrite", s => s.put(v, k)); },
+  del(k) { return this.run("readwrite", s => s.delete(k)); },
+};
+const Sync = {
+  supported: typeof window.showDirectoryPicker === "function",
+  dir: null, name: "", state: "none", names: {}, snaps: {}, last: 0, err: null, timer: null,
+  seen: {}, pushed: {}, conflicts: [], polling: false, lastPoll: 0,
+  async init() {
+    if (window.AndroidFS) { try { if (AndroidFS.hasFolder()) { this.dir = window.__androidDir(); this.name = AndroidFS.folderName(); this.state = "ok"; } } catch (e) { console.warn(e); } return; }
+    if (!this.supported) return;
+    try {
+      const h = await idb.get("dir"); if (!h) return;
+      this.dir = h; this.name = h.name;
+      this.state = (await h.queryPermission({ mode: "readwrite" })) === "granted" ? "ok" : "need";
+    } catch (e) { console.warn("sync init", e); }
+  },
+  async pick() {
+    try {
+      const h = await window.showDirectoryPicker({ id: "kronikar", mode: "readwrite" });
+      await idb.set("dir", h).catch(() => { });
+      this.dir = h; this.name = h.name; this.state = "ok"; this.names = {}; this.snaps = {}; this.seen = {}; this.pushed = {};
+      const n = await this.pull();
+      await this.pushAll();
+      toast(n ? `Načítané z priečinka: ${n} ${plural(n, "projekt", "projekty", "projektov")}.` : "Priečinok je prepojený, projekty sa doň ukladajú automaticky.");
+    } catch (e) { if (e && e.name !== "AbortError") { console.error(e); toast("Priečinok sa nepodarilo prepojiť."); } }
+    if (S.view === "home") render(); else setSave("ok");
+  },
+  async grant() {
+    try {
+      this.state = (await this.dir.requestPermission({ mode: "readwrite" })) === "granted" ? "ok" : "need";
+      if (this.state === "ok") { await this.pull(); if (S.p) this.schedule(S.p.id, 0); }
+    } catch (e) { console.warn(e); }
+    if (S.view === "home") render(); else setSave("ok");
+  },
+  async disconnect() { await idb.del("dir").catch(() => { }); this.dir = null; this.name = ""; this.state = "none"; render(); },
+  fileName(title) { return slug(title) + ".kronikar.json"; },
+  isConflict: name => /\.sync-conflict-/i.test(name) && /\.json$/i.test(name),
+  async readJSON(h) { const f = await h.getFile(); return { f, data: JSON.parse(await f.text()) }; },
+  mergeTemplates(list) {
+    const mine = Object.fromEntries((S.userTpls || []).map(u => [u.id, u])); let ch = false;
+    (list || []).forEach(u => { const m = mine[u.id]; if (!m || (u.updated || u.created || 0) > (m.updated || m.created || 0)) { mine[u.id] = u; ch = true; } });
+    if (ch) { S.userTpls = Object.values(mine); Store.set("meta/templates", { list: S.userTpls }).catch(() => { }); }
+    return ch;
+  },
+  /* import a foreign copy as a separate project, so nothing is lost */
+  async importCopy(data, label) {
+    const id = uid("p"), p = Object.assign({}, data.project, { title: (data.project.title || "Bez názvu") + " (" + label + ")", updated: Date.now() });
+    await writeBackupToStore(Object.assign({}, data, { project: p }), id, false);
+    await loadProjects(); await this.push(id);
+    return p.title;
+  },
+  /* read every project file in the folder; import new ones, replace older browser copies */
+  async pull() {
+    if (this.state !== "ok") return 0;
+    let n = 0; const conflicts = [];
+    await loadProjects();
+    for await (const [name, h] of this.dir.entries()) {
+      if (h.kind !== "file") continue;
+      try {
+        if (name === "kronikar-sablony.json") { const { f, data } = await this.readJSON(h); this.seen[name] = f.lastModified; this.mergeTemplates(data.list); continue; }
+        if (this.isConflict(name)) { const { f, data } = await this.readJSON(h); if (data.format === "kronikar" && data.project) conflicts.push({ name, title: data.project.title, when: f.lastModified }); continue; }
+        if (!name.endsWith(".kronikar.json")) continue;
+        const { f, data } = await this.readJSON(h);
+        if (data.format !== "kronikar" || !data.project || !data.id) continue;
+        this.names[data.id] = name; this.seen[name] = f.lastModified;
+        const local = S.projects.find(p => p.id === data.id), rUpd = data.project.updated || 0;
+        if (S.p && S.p.id === data.id) { await this.applyToOpen(data); continue; }
+        if (!local || rUpd > (local.updated || 0) + 1000) { await writeBackupToStore(data, data.id, !!local); n++; }
+        this.pushed[data.id] = Math.max(rUpd, local?.updated || 0);
+      } catch (e) { console.warn("pull", name, e); }
+    }
+    this.conflicts = conflicts;
+    if (n) await loadProjects();
+    return n;
+  },
+  /* the open project changed on another device */
+  async applyToOpen(data) {
+    const rUpd = data.project.updated || 0, loc = S.p.updated || 0;
+    if (rUpd <= loc + 1000) return false;
+    const unsaved = Q.pending.size || (edState && edState.dirty) || loc > (this.pushed[S.p.id] || 0) + 1000;
+    if (unsaved) { const t = await this.importCopy(data, "z iného zariadenia"); toast("Na inom zariadení sa projekt medzitým zmenil – tamtú verziu som uložila ako „" + t + "“."); return true; }
+    const keep = { mode: S.mode, sel: S.sel, ent: S.ent, cat: S.cat };
+    await writeBackupToStore(data, data.id, true);
+    this.pushed[data.id] = rUpd;
+    await openProject(data.id, keep.sel);
+    Object.assign(S, { ent: keep.ent, cat: keep.cat });
+    if (keep.mode !== "write") setMode(keep.mode);
+    toast("Načítaná novšia verzia z iného zariadenia.");
+    return true;
+  },
+  /* check the folder for changes made elsewhere (Syncthing etc.) */
+  async poll() {
+    if (this.state !== "ok" || this.polling || document.visibilityState !== "visible") return;
+    this.polling = true; this.lastPoll = Date.now();
+    try {
+      let changedHome = false; const conflicts = [];
+      for await (const [name, h] of this.dir.entries()) {
+        if (h.kind !== "file") continue;
+        if (this.isConflict(name)) { try { const { f, data } = await this.readJSON(h); if (data.format === "kronikar") conflicts.push({ name, title: data.project?.title, when: f.lastModified }); } catch { } continue; }
+        if (!name.endsWith(".kronikar.json") && name !== "kronikar-sablony.json") continue;
+        const f = await h.getFile();
+        if (this.seen[name] === f.lastModified) continue;
+        let data; try { data = JSON.parse(await f.text()); } catch { continue; } /* file may be mid-sync */
+        this.seen[name] = f.lastModified;
+        if (name === "kronikar-sablony.json") { if (this.mergeTemplates(data.list) && S.mode === "export") renderMode(); continue; }
+        if (data.format !== "kronikar" || !data.id) continue;
+        this.names[data.id] = name;
+        if (S.p && S.p.id === data.id) { await this.applyToOpen(data); continue; }
+        const local = (await Store.get(projPath(data.id)));
+        if (!local || (data.project.updated || 0) > (local.updated || 0) + 1000) { await writeBackupToStore(data, data.id, !!local); this.pushed[data.id] = data.project.updated || 0; changedHome = true; }
+      }
+      const cc = conflicts.length !== this.conflicts.length; this.conflicts = conflicts;
+      if ((changedHome || cc) && S.view === "home") { await loadProjects(); render(); }
+    } catch (e) {
+      console.warn("poll", e);
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) { this.state = "need"; setSave("ok"); }
+    } finally { this.polling = false; }
+  },
+  schedule(pid, ms = 1500) { if (this.state !== "ok") return; clearTimeout(this.timer); this.timer = setTimeout(() => this.push(pid), ms); },
+  async write(dir, name, text) { const fh = await dir.getFileHandle(name, { create: true }); const w = await fh.createWritable(); await w.write(text); await w.close(); return fh; },
+  async push(pid) {
+    if (this.state !== "ok" || !pid) return;
+    try {
+      const data = await buildBackup(pid), name = this.fileName(data.project.title), text = JSON.stringify(data);
+      /* never overwrite a newer version that arrived from another device in the meantime */
+      try {
+        const cur = await this.dir.getFileHandle(name);
+        const f = await cur.getFile();
+        if (this.seen[name] !== undefined && f.lastModified !== this.seen[name]) {
+          const remote = JSON.parse(await f.text());
+          if (remote.id === pid && (remote.project?.updated || 0) > (this.pushed[pid] || 0) + 1000) {
+            this.seen[name] = f.lastModified;
+            const t = await this.importCopy(remote, "z iného zariadenia");
+            toast("Súbor sa zmenil aj na inom zariadení – tamtú verziu som uložila ako „" + t + "“.");
+          }
+        }
+      } catch { /* file does not exist yet */ }
+      const fh = await this.write(this.dir, name, text);
+      this.seen[name] = (await fh.getFile()).lastModified; this.pushed[pid] = data.project.updated || 0;
+      if (this.names[pid] && this.names[pid] !== name) { await this.dir.removeEntry(this.names[pid]).catch(() => { }); delete this.seen[this.names[pid]]; }
+      this.names[pid] = name;
+      if (this.snaps[pid] !== today()) {
+        const sub = await this.dir.getDirectoryHandle("zalohy", { create: true });
+        await this.write(sub, slug(data.project.title) + "-" + today() + ".json", text);
+        this.snaps[pid] = today();
+      }
+      this.last = Date.now(); this.err = null;
+    } catch (e) {
+      console.error("sync push", e); this.err = e;
+      if (e && (e.name === "NotAllowedError" || e.name === "SecurityError")) this.state = "need";
+    }
+    setSave(Q.err ? "err" : Q.pending.size ? "busy" : "ok");
+  },
+  async pushAll() { for (const p of S.projects) await this.push(p.id); },
+  async remove(pid, title) { if (this.state !== "ok") return; const name = this.names[pid] || this.fileName(title); await this.dir.removeEntry(name).catch(() => { }); delete this.names[pid]; delete this.seen[name]; },
+  async resolveConflict(name, keep) {
+    try {
+      if (keep) { const h = await this.dir.getFileHandle(name); const { f, data } = await this.readJSON(h); const t = await this.importCopy(data, "konflikt " + new Date(f.lastModified).toLocaleDateString("sk-SK")); toast("Uložené ako „" + t + "“."); }
+      await this.dir.removeEntry(name);
+    } catch (e) { console.warn(e); toast("Súbor sa nepodarilo spracovať."); }
+    this.conflicts = this.conflicts.filter(c => c.name !== name);
+    await loadProjects(); render();
+  },
+};
+setInterval(() => Sync.poll(), 15000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") Sync.poll();
+  else if (S.p && Sync.state === "ok") flush().then(() => Sync.push(S.p.id));
+});
+window.addEventListener("focus", () => { if (Date.now() - Sync.lastPoll > 4000) Sync.poll(); });
+async function buildBackup(id) {
+  const cur = S.p && S.p.id === id;
+  const doc = cur ? projDoc(S.p) : await Store.get(projPath(id));
+  const items = cur ? Object.values(S.items) : await Store.list("projects/" + id + "/items");
+  const ents = cur ? Object.values(S.ents) : await Store.list("projects/" + id + "/ents");
+  return { format: "kronikar", version: 1, id, exported: new Date().toISOString(), project: doc,
+    items: Object.fromEntries(items.map(i => [i.id, { html: i.html || "", notes: i.notes || "" }])),
+    ents: Object.fromEntries(ents.map(e => { const { id: x, ...r } = e; return [x, r]; })) };
+}
+async function writeBackupToStore(data, id, replace) {
+  if (replace) {
+    const [items, ents] = await Promise.all([Store.list("projects/" + id + "/items"), Store.list("projects/" + id + "/ents")]);
+    for (const i of items) if (!(data.items || {})[i.id]) await Store.del(itemPath(id, i.id));
+    for (const e of ents) if (!(data.ents || {})[e.id]) await Store.del(entPath(id, e.id));
+  }
+  for (const [iid, it] of Object.entries(data.items || {})) await Store.set(itemPath(id, iid), it);
+  for (const [eid, e] of Object.entries(data.ents || {})) await Store.set(entPath(id, eid), e);
+  await Store.set(projPath(id), Object.assign(defaultProject(), data.project));
+}
+function syncCard() {
+  if (Store.mode === "cloud") return "";
+  if (!Sync.supported) return `<div class="notice warn"><span><b>Projekty sa ukladajú v tomto prehliadači.</b> Automatické ukladanie do súboru funguje v Chrome a Edge. V Brave ho zapneš cez <span class="mono">brave://flags/#file-system-access-api</span> (nastav Enabled a reštartuj prehliadač). Dovtedy si pravidelne sťahuj zálohu.</span></div>`;
+  const conf = Sync.state === "ok" && Sync.conflicts.length ? `<div class="notice warn sync" style="flex-direction:column;align-items:stretch"><span><b>Syncthing našiel ${Sync.conflicts.length} ${plural(Sync.conflicts.length, "konfliktnú verziu", "konfliktné verzie", "konfliktných verzií")}.</b> Vznikajú, keď sa ten istý projekt upraví na dvoch zariadeniach naraz. Môžeš ich načítať ako samostatný projekt a porovnať, alebo zahodiť.</span>${Sync.conflicts.map(c => `<div class="btnrow" style="align-items:center"><span style="flex:1;min-width:0">${esc(c.title || c.name)} <small class="hint">· ${new Date(c.when).toLocaleString("sk-SK")}</small></span><button class="btn sm" data-cfkeep="${esc(c.name)}">Načítať ako kópiu</button><button class="btn sm ghost danger" data-cfdrop="${esc(c.name)}">Zahodiť</button></div>`).join("")}</div>` : "";
+  if (Sync.state === "ok") return conf + `<div class="notice sync ok"><span class="sdot"></span><span style="flex:1"><b>Automaticky ukladám do priečinka „${esc(Sync.name)}“.</b> Po každej zmene sa prepíše súbor projektu (<span class="mono">názov.kronikar.json</span>), raz denne sa pridá kópia do podpriečinka <span class="mono">zalohy</span> a zmeny z iných zariadení (napr. cez Syncthing) sa načítajú samy.${Sync.last ? " Naposledy uložené " + new Date(Sync.last).toLocaleTimeString("sk-SK", { hour: "2-digit", minute: "2-digit" }) + "." : ""}</span><span class="btnrow"><button class="btn sm" id="syncPick">Zmeniť priečinok</button><button class="btn sm ghost" id="syncOff">Odpojiť</button></span></div>`;
+  if (Sync.state === "need") return `<div class="notice warn sync"><span style="flex:1"><b>Prehliadač potrebuje znova povoliť ukladanie do priečinka „${esc(Sync.name)}“.</b> Stačí kliknúť – bez toho sa zmeny ukladajú len do prehliadača.</span><span class="btnrow"><button class="btn sm primary" id="syncGrant">Povoliť prístup</button><button class="btn sm ghost" id="syncOff">Odpojiť</button></span></div>`;
+  return `<div class="notice warn sync"><span style="flex:1"><b>Zapni automatické ukladanie do súboru.</b> Vyber priečinok (napr. v Dokumentoch alebo na OneDrive) a Kronikár doň po každej zmene uloží celý projekt. Keď otvoríš appku v inom prehliadači alebo počítači a vyberieš ten istý priečinok, projekty sa načítajú.</span><span class="btnrow"><button class="btn sm primary" id="syncPick">Vybrať priečinok</button></span></div>`;
+}
+function bindSyncCard() {
+  $("#syncPick")?.addEventListener("click", () => Sync.pick());
+  $("#syncGrant")?.addEventListener("click", () => Sync.grant());
+  $("#syncOff")?.addEventListener("click", () => Sync.disconnect());
+  $$("[data-cfkeep]").forEach(b => b.onclick = () => Sync.resolveConflict(b.dataset.cfkeep, true));
+  $$("[data-cfdrop]").forEach(b => b.onclick = () => Sync.resolveConflict(b.dataset.cfdrop, false));
+}
+</script>

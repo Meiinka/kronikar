@@ -1,0 +1,233 @@
+<div id="app"><div class="loading">Otváram kroniky…</div></div>
+<script>
+"use strict";
+/* ================= utilities ================= */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uid = (p = "") => p + Date.now().toString(36).slice(-5) + Math.random().toString(36).slice(2, 8);
+const nf = n => (n || 0).toLocaleString((LANG === "en" ? "en-US" : "sk-SK"));
+const today = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const clone = o => JSON.parse(JSON.stringify(o));
+function debounce(fn, ms) { let t; const f = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; f.now = (...a) => { clearTimeout(t); fn(...a); }; return f; }
+function htmlToText(html) {
+  if (!html) return "";
+  const d = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+  return [...d.body.firstChild.childNodes].map(n => n.textContent).join("\n");
+}
+const countChars = html => htmlToText(html).replace(/\n/g, "").replace(/\s+/g, " ").length;
+const NS_CHARS = 1800;
+const fmtNS = ch => (Math.round(ch / NS_CHARS * 10) / 10).toLocaleString((LANG === "en" ? "en-US" : "sk-SK"), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const countWords = t => (t.match(/[\p{L}\p{N}][\p{L}\p{N}'’\-]*/gu) || []).length;
+function relTime(ts) {
+  if (!ts) return "";
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return "práve teraz";
+  if (s < 3600) return "pred " + Math.round(s / 60) + " min";
+  if (s < 86400) return "pred " + Math.round(s / 3600) + " h";
+  const d = Math.round(s / 86400);
+  if (d === 1) return "včera";
+  if (d < 30) return "pred " + d + " dňami";
+  return new Date(ts).toLocaleDateString((LANG === "en" ? "en-US" : "sk-SK"));
+}
+function plural(n, one, few, many) { return n === 1 ? one : (n >= 2 && n <= 4 ? few : many); }
+let toastT;
+function toast(msg) {
+  let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2600);
+}
+function autoGrow(el) { el.style.height = "auto"; el.style.height = el.scrollHeight + 2 + "px"; }
+
+const I = {
+  logo: '<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M7 4h15a3 3 0 0 1 3 3v19a2 2 0 0 1-2 2H9a3 3 0 0 1-3-3V5a1 1 0 0 1 1-1Z" fill="var(--accent)" opacity=".18"/><path d="M7 4h15a3 3 0 0 1 3 3v19a2 2 0 0 1-2 2H9a3 3 0 0 1-3-3V5a1 1 0 0 1 1-1Z M6 25a3 3 0 0 1 3-3h16" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.5 l4 3 4-3 M16 12.5v5" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  chev: '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  doc: '<svg class="ic" viewBox="0 0 16 16"><path d="M4 1.5h5.5L13 5v9.5H4z M9.5 1.5V5H13 M6 8h5 M6 10.5h5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  folder: '<svg class="ic" viewBox="0 0 16 16"><path d="M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  part: '<svg class="ic" viewBox="0 0 16 16"><path d="M3 2h9l1 1v11H4l-1-1z M5.5 2v12" fill="currentColor" fill-opacity=".15" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+  plus: '<svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  search: '<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 10.5 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  back: '<svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pen: '<svg viewBox="0 0 20 20"><path d="M3 17l1-4L13.5 3.5l3 3L7 16z M11.5 5.5l3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  globe: '<svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 10h15M10 2.5c-2.5 2.5-2.5 12.5 0 15M10 2.5c2.5 2.5 2.5 12.5 0 15" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  net: '<svg viewBox="0 0 20 20"><circle cx="4.5" cy="5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="15.5" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="15" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.6 5.3l6.8.5M5.5 7l2.6 6M14.3 8l-4 5.2" stroke="currentColor" stroke-width="1.3"/></svg>',
+  book: '<svg viewBox="0 0 20 20"><path d="M3 4.5c2.5-1 5-1 7 .8 2-1.8 4.5-1.8 7-.8v11c-2.5-1-5-1-7 .8-2-1.8-4.5-1.8-7-.8z M10 5.3v11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+  gear: '<svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M4.3 15.7l1.8-1.8M13.9 6.1l1.8-1.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  tree: '<svg viewBox="0 0 20 20"><path d="M3 10h4M7 4.5v11M7 4.5h4M7 10h4M7 15.5h4" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11" y="2.5" width="6" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="8" width="6" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="11" y="13.5" width="6" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  focus: '<svg viewBox="0 0 16 16"><path d="M2 5.5V2h3.5M10.5 2H14v3.5M14 10.5V14h-3.5M5.5 14H2v-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  panel: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 2.5v11" stroke="currentColor" stroke-width="1.4"/></svg>',
+  cards: '<svg viewBox="0 0 16 16"><rect x="1.5" y="2" width="5.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="2" width="5.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="1.5" y="9" width="5.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="9" y="9" width="5.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',
+  read: '<svg viewBox="0 0 16 16"><path d="M3 3h10M3 6h10M3 9h10M3 12h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  up: '<svg viewBox="0 0 16 16"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  down: '<svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  link: '<svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 0 1-3.5-3.5l1-1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  dl: '<svg viewBox="0 0 16 16"><path d="M8 2v8M4.5 7 8 10.5 11.5 7M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  ul: '<svg viewBox="0 0 16 16"><path d="M8 10.5V2.5M4.5 6 8 2.5 11.5 6M3 13.5h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  trash: '<svg viewBox="0 0 16 16"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  fit: '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/></svg>',
+};
+
+/* ================= domain constants ================= */
+const BASE_CATS = [
+  { id: "krajina", name: "Krajiny a miesta", one: "Miesto", fields: ["Typ (kráľovstvo, mesto, región…)", "Podnebie a krajina", "Vláda a moc", "Obyvatelia", "Dejiny", "Zaujímavé miesta"] },
+  { id: "postava", name: "Postavy", one: "Postava", fields: ["Úloha v príbehu", "Vek", "Pôvod / rasa", "Vzhľad", "Povaha", "Motivácia", "Tajomstvo"] },
+  { id: "rasa", name: "Rasy a národy", one: "Rasa", fields: [{ n: "Druh", key: true, opts: ["Ľudská rasa", "Elfská / víla", "Trpasličia", "Zvieracia / meňavci", "Obrovská", "Nemŕtva", "Duchovná / éterická", "Démonická / pekelná", "Drakovitá", "Umelo stvorená", "Iná"] }, "Vzhľad a stavba tela", "Dĺžka života a dospievanie", "Domovina a rozšírenie", "Spoločnosť a vláda", "Kultúra, zvyky a viera", "Jazyk a písmo", "Vzťah k mágii", "Zvláštne schopnosti", "Slabosti a obmedzenia", "Pôvod a dejiny", "Postoj k iným rasám"] },
+  { id: "nabozenstvo", name: "Náboženstvá", one: "Náboženstvo", fields: ["Božstvá", "Učenie a dogmy", "Rituály a sviatky", "Kňazstvo", "Symboly", "Postoj k mágii"] },
+  { id: "bozstvo", name: "Božstvá", one: "Božstvo", fields: [{ n: "Druh boha", key: true, opts: ["Hlavné božstvo", "Nižšie božstvo", "Polobožstvo", "Prastaré / prvotné božstvo", "Zbožštený smrteľník", "Duch alebo démon", "Zabudnuté či mŕtve božstvo", "Falošné božstvo"] }, "Doména (čomu vládne)", "Podoba a prejavy", "Symboly a posvätné predmety", "Uctievači a kult", "Mýty a legendy", "Vzťah k smrteľníkom"] },
+  { id: "magia", name: "Mágia", one: "Magický systém", fields: ["Zdroj moci", "Pravidlá", "Cena a obmedzenia", "Kto ju ovláda", "Prejavy a kúzla", "Postoj spoločnosti"] },
+  { id: "frakcia", name: "Rody a frakcie", one: "Frakcia", fields: ["Vodca", "Ciele", "Sídlo", "Znak a farby", "Spojenci a nepriatelia"] },
+  { id: "predmet", name: "Artefakty", one: "Artefakt", fields: ["Pôvod", "Schopnosti", "Súčasný držiteľ", "Podoba"] },
+  { id: "udalost", name: "Dejiny a udalosti", one: "Udalosť", fields: ["Dátum / éra", "Priebeh", "Účastníci", "Následky"] },
+  { id: "poznamka", name: "Poznámky", one: "Poznámka", fields: [] },
+];
+let CATS = BASE_CATS.slice(), CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
+const CUSTOM_COLORS = ["#2F8F83", "#7A8A2A", "#6B5BB5", "#C0812A", "#5E8C2F", "#B5523A", "#3A7FB8", "#8A7350", "#A04BB0", "#4F6B7E"];
+function setCats(custom) {
+  const base = BASE_CATS.filter(c => c.id !== "poznamka"), note = BASE_CATS.find(c => c.id === "poznamka");
+  CATS = base.concat((custom || []).map(c => Object.assign({ fields: [] }, c, { custom: true })), [note]);
+  CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
+}
+const catColor = id => CAT[id]?.custom ? CAT[id].color : `var(--c-${CAT[id] ? id : "poznamka"})`;
+const STATUSES = [
+  { id: "napad", name: "Nápad" }, { id: "koncept", name: "Koncept" }, { id: "revizia", name: "Revízia" }, { id: "hotovo", name: "Hotovo" },
+];
+const STAT = Object.fromEntries(STATUSES.map(s => [s.id, s]));
+const REL_SUGGEST = {
+  "krajina>postava": ["je domovom", "vládne mu", "vyhnala"], "postava>krajina": ["pochádza z", "vládne", "žije v", "putuje do"],
+  "postava>nabozenstvo": ["vyznáva", "je kňazom", "odpadol od", "prenasleduje"], "nabozenstvo>postava": ["uctieva ako svätca", "prekliala"],
+  "postava>magia": ["ovláda", "učí sa", "je imúnny voči", "bojí sa"], "magia>postava": ["poznačila"],
+  "krajina>nabozenstvo": ["vyznáva", "zakazuje", "toleruje"], "nabozenstvo>krajina": ["je rozšírené v", "vzniklo v", "má svätyňu v"],
+  "nabozenstvo>magia": ["uznáva", "zakazuje", "je zdrojom"], "magia>nabozenstvo": ["je zakázaná v", "pochádza z"],
+  "krajina>magia": ["zakazuje", "je zdrojom", "chráni"], "magia>krajina": ["pochádza z", "je viazaná na"],
+  "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil"],
+  "postava>frakcia": ["vedie", "je členom", "zradil"], "frakcia>krajina": ["sídli v", "vládne", "bojuje proti"],
+  "postava>predmet": ["vlastní", "hľadá", "ukoval"], "predmet>magia": ["je nasýtený", "ruší"],
+  "udalost>krajina": ["sa odohrala v", "zničila"], "postava>udalost": ["sa zúčastnil", "spôsobil", "prežil"],
+};
+Object.assign(REL_SUGGEST, {
+  "nabozenstvo>bozstvo": ["uctieva", "zavrhuje"], "bozstvo>nabozenstvo": ["je uctievané v", "založilo"], "postava>bozstvo": ["uctieva", "slúži", "zradil", "je dieťaťom"],
+  "bozstvo>postava": ["požehnalo", "preklialo", "vyvolilo si"], "bozstvo>bozstvo": ["je dieťaťom", "je manželom / manželkou", "je súrodencom", "bojuje proti", "porazilo"],
+  "bozstvo>magia": ["je zdrojom", "zakázalo"], "magia>bozstvo": ["pochádza od"], "bozstvo>krajina": ["chráni", "stvorilo", "prekliatlo"], "krajina>bozstvo": ["uctieva"],
+  "postava>rasa": ["patrí k", "je miešancom", "je vyhnancom z", "nenávidí", "vedie"], "rasa>postava": ["prijala medzi seba", "uctieva", "prenasleduje"],
+  "rasa>krajina": ["obýva", "pochádza z", "vládne", "bola vyhnaná z"], "krajina>rasa": ["je domovom", "zotročuje", "toleruje"],
+  "rasa>rasa": ["je spojencom", "bojuje proti", "je odnožou", "pohŕda", "obchoduje s", "zotročila"],
+  "rasa>bozstvo": ["uctieva", "zavrhla"], "bozstvo>rasa": ["stvorilo", "požehnalo", "preklialo"], "rasa>nabozenstvo": ["vyznáva", "zakazuje"],
+  "rasa>magia": ["ovláda", "je imúnna voči", "stvorila", "bojí sa"], "magia>rasa": ["poznačila", "je vrodená pre"], "rasa>frakcia": ["tvorí", "bojuje proti"], "frakcia>rasa": ["prenasleduje", "chráni"],
+  "rasa>udalost": ["spôsobila", "prežila", "vymrela počas"], "udalost>rasa": ["zdecimovala", "zjednotila"],
+  "postava>krajina": ["pochádza z", "vládne", "žije v", "putuje do", "odišiel z", "je vyhnancom z"], "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil", "je spojencom", "je rivalom", "pohádal sa s"],
+});
+const fieldName = f => typeof f === "string" ? f : f.n;
+const keyFieldOf = e => { const f = (CAT[e.cat]?.fields || []).find(x => typeof x === "object" && x.key); return f ? { n: f.n, v: (e.fields || {})[f.n] || "" } : null; };
+const relSuggest = (a, b) => [...new Set([...(REL_SUGGEST[a + ">" + b] || []), "súvisí s", "pozná", "vedie k"])];
+
+/* ================= storage ================= */
+const Store = {
+  mode: "local", db: null, uid: null, prefix: "",
+  async init() {
+    try {
+      if (window.claude && typeof window.claude.use === "function") {
+        const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+        if (db && user) {
+          const id = await user.id();
+          if (id) { this.db = db; this.uid = id; this.mode = "cloud"; this.prefix = "data/users/" + id + "/profile/"; }
+        }
+      }
+    } catch (e) { console.warn("db init", e); }
+  },
+  lsKey: p => "kronikar:" + p,
+  async get(path) {
+    if (this.mode === "cloud") { const s = await this.db.doc(this.prefix + path).get(); return s.exists ? clone(s.data()) : null; }
+    try { const v = localStorage.getItem(this.lsKey(path)); return v ? JSON.parse(v) : null; } catch { return null; }
+  },
+  async set(path, data) {
+    if (this.mode === "cloud") return this.db.doc(this.prefix + path).set(data);
+    try { localStorage.setItem(this.lsKey(path), JSON.stringify(data)); } catch (e) { throw { code: "quota_exceeded", message: String(e) }; }
+  },
+  async del(path) {
+    if (this.mode === "cloud") return this.db.doc(this.prefix + path).delete();
+    try { localStorage.removeItem(this.lsKey(path)); } catch { }
+  },
+  async list(col) {
+    if (this.mode === "cloud") { const q = await this.db.collection(this.prefix + col).get(); return q.docs.filter(d => d.exists).map(d => ({ id: d.id, ...clone(d.data()) })); }
+    const pre = this.lsKey(col + "/"), out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k.startsWith(pre) && !k.slice(pre.length).includes("/")) { try { out.push({ id: k.slice(pre.length), ...JSON.parse(localStorage.getItem(k)) }); } catch { } }
+      }
+    } catch { }
+    return out;
+  },
+};
+
+/* write queue: one in-flight write per document, latest state wins */
+const Q = { pending: new Map(), inflight: new Set(), timer: null, err: null };
+function qset(path, getData) { Q.pending.set(path, { getData }); schedFlush(); }
+function qdel(path) { Q.pending.set(path, { del: true }); schedFlush(); }
+function schedFlush(ms = 900) { setSave("busy"); clearTimeout(Q.timer); Q.timer = setTimeout(flush, ms); }
+async function flush() {
+  clearTimeout(Q.timer);
+  const jobs = [...Q.pending.entries()].filter(([p]) => !Q.inflight.has(p));
+  await Promise.all(jobs.map(async ([path, job]) => {
+    Q.pending.delete(path); Q.inflight.add(path);
+    try {
+      if (job.del) await Store.del(path); else { const d = job.getData(); if (d) await Store.set(path, d); }
+      Q.err = null;
+    } catch (e) {
+      console.error("save", path, e);
+      Q.err = e;
+      if (!Q.pending.has(path) && e && e.code === "unavailable") Q.pending.set(path, job);
+    } finally { Q.inflight.delete(path); }
+  }));
+  if (Q.pending.size) schedFlush(Q.err ? 4000 : 300); else { setSave(Q.err ? "err" : "ok"); if (S.p && typeof Sync !== "undefined") Sync.schedule(S.p.id); }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
+function setSave(s) {
+  const el = $("#savestate"); if (!el) return;
+  el.className = "savestate" + (s === "busy" ? " busy" : s === "err" ? " err" : "");
+  const sy = typeof Sync !== "undefined" && Store.mode !== "cloud" ? Sync : null;
+  const where = Store.mode === "cloud" ? "v cloude" : sy && sy.state === "ok" ? "do priečinka " + sy.name : "v prehliadači";
+  el.innerHTML = '<span class="dot"></span>' + (s === "busy" ? "Ukladám…" : s === "err" ? (Q.err && Q.err.code === "quota_exceeded" ? "Úložisko je plné" : "Neuložené – skúšam znova") : "Uložené " + where) +
+    (sy && sy.state === "need" && s !== "busy" ? ' · <button class="btn sm" id="syncGrantTop">Povoliť priečinok</button>' : "") +
+    (sy && sy.state === "ok" && sy.err && s !== "busy" ? ' · <span style="color:var(--danger)">súbor sa neuložil</span>' : "");
+  const g = el.querySelector("#syncGrantTop"); if (g) g.onclick = () => Sync.grant();
+}
+
+/* ================= state ================= */
+const S = {
+  view: "home", projects: [], p: null, items: {}, ents: {},
+  mode: "write", sel: null, ent: null, cat: "all", q: "", eq: "",
+  corkView: "cards", insp: false, mobBinder: false, worldPane: "list",
+  graph: { mode: "net", root: null, off: new Set(), labels: true, sel: null, src: null, view: { x: 0, y: 0, k: 1 } },
+  newForm: false, confirm: null,
+};
+const P = () => S.p;
+const projPath = id => "projects/" + id;
+const itemPath = (pid, id) => "projects/" + pid + "/items/" + id;
+const entPath = (pid, id) => "projects/" + pid + "/ents/" + id;
+function saveProject() { const p = S.p; if (!p) return; p.updated = Date.now(); p.words = totalWords(); p.entCount = Object.keys(S.ents).length; touchDaily(); const id = p.id; qset(projPath(id), () => (S.p && S.p.id === id ? projDoc(S.p) : null)); }
+function projDoc(p) { const { id, ...rest } = p; return clone(rest); }
+function saveItem(id) { const pid = S.p.id; qset(itemPath(pid, id), () => { const it = S.items[id]; return it ? { html: it.html || "", notes: it.notes || "" } : null; }); }
+function saveEnt(id) { const pid = S.p.id; qset(entPath(pid, id), () => { const e = S.ents[id]; if (!e) return null; const { id: _x, ...r } = e; return clone(r); }); saveProject(); }
+
+/* tree helpers */
+function walk(nodes, fn, parent = null, depth = 0) { for (let i = 0; i < nodes.length; i++) { const n = nodes[i]; if (fn(n, parent, i, depth) === false) return false; if (n.children && walk(n.children, fn, n, depth + 1) === false) return false; } }
+function findNode(id) { let r = null; walk(S.p.binder, (n, par, i) => { if (n.id === id) { r = { n, parent: par, i, list: par ? par.children : S.p.binder }; return false; } }); return r; }
+function allTexts(nodes = S.p.binder, acc = []) { for (const n of nodes) { if (n.type === "text") acc.push(n); if (n.children) allTexts(n.children, acc); } return acc; }
+function nodeWords(n) { if (n.type === "text") return n.words || 0; return (n.children || []).reduce((a, c) => a + nodeWords(c), 0); }
+function nodeChars(n) { if (n.type === "text") return n.chars ?? (n.chars = countChars(S.items[n.id]?.html)); return (n.children || []).reduce((a, c) => a + nodeChars(c), 0); }
+function totalChars() { return S.p ? S.p.binder.reduce((a, n) => a + nodeChars(n), 0) : 0; }
+function totalWords() { return S.p ? S.p.binder.reduce((a, n) => a + nodeWords(n), 0) : 0; }
+function isAncestor(aId, bId) { const a = findNode(aId); if (!a) return false; let hit = false; walk(a.n.children || [], n => { if (n.id === bId) { hit = true; return false; } }); return hit; }
+function entsBy(cat) { return Object.values(S.ents).filter(e => !cat || cat === "all" || e.cat === cat).sort((a, b) => a.name.localeCompare(b.name, "sk")); }
+
+function touchDaily() {
+  const p = S.p, d = today(), tw = totalWords();
+  if (!p.dayStart || p.dayStart.date !== d) p.dayStart = { date: d, words: tw };
+  p.history = p.history || {};
+  const w = Math.max(0, tw - p.dayStart.words);
+  if ((p.history[d] || 0) !== w) {
+    p.history[d] = w;
+    const keys = Object.keys(p.history).sort(); while (keys.length > 90) delete p.history[keys.shift()];
+  }
+}
+</script>

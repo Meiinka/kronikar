@@ -1,0 +1,18 @@
+# build output
+dist/
+win/Kronikar.html
+win/pdfmake.min.js
+win/Kronikar-Setup.exe
+android/assets/
+android/gen/
+android/classes/
+android/out/
+docs/guides/*.html
+__pycache__/
+node_modules/
+
+# NEVER commit signing keys
+*.jks
+*.keystore
+*.p12
+*.pem

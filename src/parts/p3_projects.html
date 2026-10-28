@@ -1,0 +1,166 @@
+<script>
+/* ================= projects ================= */
+function newBinder() {
+  const s = { id: uid("t"), type: "text", title: tl("Scéna 1"), status: "napad", synopsis: "", include: true, words: 0, ents: [] };
+  return { binder: [{ id: uid("f"), type: "folder", kind: "chapter", title: tl("Kapitola 1"), open: true, synopsis: "", include: true, children: [s] }], first: s.id };
+}
+function defaultProject(o = {}) {
+  return Object.assign({
+    title: tl("Bez názvu"), subtitle: "", author: "", genre: "", created: Date.now(), updated: Date.now(),
+    binder: [], links: [], customCats: [], quotes: LANG === "en" ? "us" : "sk", lang: LANG, graphPos: {}, goals: { total: 90000, daily: 1000 }, dayStart: null, history: {},
+    exp: { size: "A5", font: "Literata", tpl: "klasicka", runhead: true, fs: 10, lh: 1.3, margins: "normal", v: 2, toc: true, numbering: "word", sceneBreak: "tpl", dedication: "", copyright: "", partLabel: tl("Časť"), chapLabel: tl("Kapitola") },
+    words: 0, entCount: 0,
+  }, o);
+}
+async function loadProjects() { S.projects = (await Store.list("projects")).sort((a, b) => (b.updated || 0) - (a.updated || 0)); }
+async function createProject({ title, genre, author }) {
+  const id = uid("p"), nb = newBinder();
+  const p = defaultProject({ title: title || tl("Bez názvu"), genre, author, binder: nb.binder });
+  await Store.set(projPath(id), p);
+  await Store.set(itemPath(id, nb.first), { html: "", notes: "" });
+  await openProject(id, nb.first);
+}
+async function openProject(id, sel) {
+  render.loading("Otváram projekt…");
+  const doc = await Store.get(projPath(id));
+  if (!doc) { toast("Projekt sa nepodarilo načítať."); return goHome(); }
+  S.p = Object.assign(defaultProject(), doc, { id });
+  S.p.exp = Object.assign(defaultProject().exp, doc.exp || {});
+  if ((S.p.exp.v || 1) < 2) { if (S.p.exp.fs >= 11) S.p.exp.fs = 10; if (S.p.exp.lh >= 1.4) S.p.exp.lh = 1.3; S.p.exp.margins = "normal"; S.p.exp.v = 2; }
+  if (!S.p.exp.tpl) { S.p.exp.tpl = "klasicka"; if (S.p.exp.sceneBreak === "* * *") S.p.exp.sceneBreak = "tpl"; if (S.p.exp.runhead === undefined) S.p.exp.runhead = true; }
+  setCats(S.p.customCats);
+  const [items, ents] = await Promise.all([Store.list("projects/" + id + "/items"), Store.list("projects/" + id + "/ents")]);
+  S.items = Object.fromEntries(items.map(i => [i.id, i]));
+  S.ents = Object.fromEntries(ents.map(e => [e.id, e]));
+  // reconcile words with content
+  allTexts().forEach(n => { const it = S.items[n.id]; if (it) { n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html); } });
+  S.view = "project"; S.mode = "write"; S.ent = null; S.cat = "all"; S.q = ""; S.eq = "";
+  S.graph.sel = null; S.graph.src = null; S.graph.root = null; S.graph.view = { x: 0, y: 0, k: 1 }; S.graph.fitted = false;
+  const first = sel || (allTexts()[0] || {}).id || (S.p.binder[0] || {}).id || null;
+  S.sel = first;
+  touchDaily();
+  render();
+  Sync.schedule(id, 800);
+}
+async function goHome() { await flush(); S.view = "home"; S.p = null; setCats([]); S.catEdit = null; S.items = {}; S.ents = {}; document.body.classList.remove("focus"); render.loading("Načítavam projekty…"); await loadProjects(); render(); }
+async function deleteProject(id) {
+  render.loading("Mažem projekt…");
+  const meta = S.projects.find(p => p.id === id); if (meta) await Sync.remove(id, meta.title);
+  const [items, ents] = await Promise.all([Store.list("projects/" + id + "/items"), Store.list("projects/" + id + "/ents")]);
+  for (const i of items) await Store.del(itemPath(id, i.id));
+  for (const e of ents) await Store.del(entPath(id, e.id));
+  await Store.del(projPath(id));
+  S.confirm = null; await loadProjects(); render(); toast("Projekt bol zmazaný.");
+}
+async function exportBackup(id) {
+  const data = await buildBackup(id);
+  await saveFile(slug(data.project.title) + "-zaloha.json", JSON.stringify(data, null, 1), "application/json");
+}
+async function importBackup(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.format !== "kronikar" || !data.project) throw new Error("Súbor nie je záloha Kronikára.");
+    const id = uid("p"), p = Object.assign(defaultProject(), data.project, { updated: Date.now() });
+    if (S.projects.some(x => x.title === p.title)) p.title += " " + tl("(obnovené)");
+    render.loading("Obnovujem zálohu…");
+    for (const [iid, it] of Object.entries(data.items || {})) await Store.set(itemPath(id, iid), it);
+    for (const [eid, e] of Object.entries(data.ents || {})) await Store.set(entPath(id, eid), e);
+    await Store.set(projPath(id), p);
+    await loadProjects(); await Sync.push(id); render(); toast("Záloha „" + p.title + "“ bola obnovená.");
+  } catch (e) { toast(e.message || "Zálohu sa nepodarilo načítať."); render(); }
+}
+const slug = s => (s || "kniha").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "kniha";
+
+let dlNs;
+async function saveFile(filename, data, mime) {
+  if (window.AndroidFS) {
+    if (typeof Sync === "undefined" || Sync.state !== "ok") { toast("Najprv na úvodnej obrazovke vyber priečinok – exporty sa ukladajú doň."); return false; }
+    try {
+      const blob = data instanceof Blob ? data : new Blob([data], { type: mime || "application/octet-stream" });
+      const b64 = await blobToB64(blob);
+      if (!AndroidFS.writeBase64("exporty", filename, b64)) throw new Error("zápis");
+      toast("Uložené do priečinka „" + Sync.name + "/exporty“: " + filename); return true;
+    } catch (e) { console.error(e); toast("Súbor sa nepodarilo uložiť."); return false; }
+  }
+  try {
+    if (dlNs === undefined) dlNs = window.claude?.use ? await window.claude.use("downloads") : null;
+    if (dlNs) { await dlNs.save({ filename, data }); toast("Súbor " + filename + " je pripravený."); return true; }
+  } catch (e) {
+    if (e && e.code === "declined") { toast("Sťahovanie zrušené."); return false; }
+    if (e && e.code === "rate_limited") { toast("Počkaj chvíľu, predchádzajúce sťahovanie ešte beží."); return false; }
+    console.warn("downloads", e);
+  }
+  try {
+    const blob = data instanceof Blob ? data : new Blob([data], { type: mime || "application/octet-stream" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    return true;
+  } catch { toast("Stiahnutie tu nie je dostupné."); return false; }
+}
+
+/* ================= sample project ================= */
+async function createSample() {
+  render.loading("Pripravujem ukážkový projekt…");
+  const id = uid("p");
+  const E = {}, ents = {};
+  const mk = (key, cat, name, summary, fields = {}, notes = "") => { const eid = uid("e"); E[key] = eid; ents[eid] = { cat, name: tl(name), summary: tl(summary), fields: Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, tl(v)])), custom: [], notes, tags: [], created: Date.now() }; };
+  mk("varden", "krajina", "Vardenské kráľovstvo", "Horské kráľovstvo na severe, bohaté na runový kameň a chudobné na odpustenie.", { "Typ (kráľovstvo, mesto, región…)": "Kráľovstvo", "Podnebie a krajina": "Dlhé zimy, čadivé bane, žulové údolia.", "Vláda a moc": "Absolutistická monarchia, od Noci sklenených veží vláda bez rady mágov." });
+  mk("ostrovy", "krajina", "Mlžné ostrovy", "Súostrovie na západe, ktoré sa raz za sto rokov stratí v hmle.", { "Obyvatelia": "Rybári, pašeráci a speváci hmly." });
+  mk("brana", "krajina", "Kamenná Brána", "Pohraničná pevnosť, v ktorej sídli Rad Popolných.");
+  mk("ilsa", "postava", "Ilsa Vranová", "Kováčova dcéra, ktorá v sebe objaví runový dar.", { "Úloha v príbehu": "Hlavná hrdinka", "Vek": "17", "Povaha": "Tvrdohlavá, zvedavá, verná rodine.", "Motivácia": "Ochrániť otca a pochopiť, čo je zač.", "Tajomstvo": "Pri každej rune zabudne jednu spomienku na matku." });
+  mk("odo", "postava", "Brat Odo", "Kňaz Siedmich plameňov a Ilsin nečakaný mentor.", { "Úloha v príbehu": "Mentor", "Tajomstvo": "Bol jedným z runotvorcov Noci sklenených veží." });
+  mk("merwen", "postava", "Kráľovná Merwen", "Vládkyňa Vardenu, ktorá zakázala mágiu.", { "Úloha v príbehu": "Protivníčka", "Motivácia": "Už nikdy nedopustiť pád hlavného mesta." });
+  mk("kael", "postava", "Kael z Hmly", "Pašerák a spevák hmly z ostrovov.", { "Úloha v príbehu": "Spojenec" });
+  mk("kult", "nabozenstvo", "Kult Siedmich plameňov", "Viera, že svet udržiava sedem večných ohňov – a jeden z nich sa stratil.", { "Božstvá": "Sedem plameňov, každý so svojou cnosťou.", "Rituály a sviatky": "Noc bdenia pri ohni na zimný slnovrat.", "Postoj k mágii": "Oficiálne ju odsudzuje, v skutočnosti ju stráži." });
+  mk("aurel", "bozstvo", "Aurel, Prvý plameň", "Najstarší zo siedmich ohňov, boh kovu, pamäti a obety.", { "Druh boha": "Hlavné božstvo", "Doména (čomu vládne)": "Oheň, kováčstvo, pamäť", "Symboly a posvätné predmety": "Kladivo a kruh siedmich iskier" });
+  mk("matka", "bozstvo", "Matka Hmla", "Bezmenná bytosť, ktorá bola na ostrovoch skôr než ľudia.", { "Druh boha": "Prastaré / prvotné božstvo", "Podoba a prejavy": "Hlas v hmle, studený dotyk na zátylku" });
+  mk("tichi", "nabozenstvo", "Tichí z hmly", "Ostrovania uctievajú predkov, ktorých hlasy počuť v hmle.");
+  mk("runy", "magia", "Runová väzba", "Mágia vyrytá do kameňa. Každá runa si berie kúsok pamäti toho, kto ju vyryl.", { "Zdroj moci": "Runový kameň z vardenských baní.", "Cena a obmedzenia": "Strata spomienok, vždy tých najcennejších.", "Postoj spoločnosti": "Zakázaná, trestá sa smrťou." });
+  mk("spev", "magia", "Spev hmly", "Hlasom tvarovaná ilúzia, ktorá funguje len v hmle.", { "Pravidlá": "Bez hmly nefunguje. Čím hustejšia hmla, tým silnejšia ilúzia." });
+  mk("popolni", "frakcia", "Rad Popolných", "Kráľovská stráž, ktorá loví runotvorcov.", { "Znak a farby": "Sivý plášť, čierna ruka na štíte." });
+  mk("plamen", "predmet", "Siedmy plameň", "Stratený oheň, o ktorom kult tvrdí, že nikdy nezhasol.");
+  mk("noc", "udalost", "Noc sklenených veží", "Pred štyridsiatimi rokmi runotvorci zrútili hlavné mesto. Odvtedy je mágia zakázaná.", { "Dátum / éra": "Rok 312 po Zjednotení" });
+  const L = [["ilsa", "pochádza z", "varden"], ["ilsa", "ovláda", "runy"], ["ilsa", "vyznáva", "kult"], ["odo", "je mentorom", "ilsa"], ["odo", "je kňazom", "kult"], ["odo", "hľadá", "plamen"],
+    ["merwen", "vládne", "varden"], ["merwen", "vedie", "popolni"], ["merwen", "prežil", "noc"], ["varden", "zakazuje", "runy"], ["kult", "je rozšírené v", "varden"], ["kael", "pochádza z", "ostrovy"],
+    ["kael", "ovláda", "spev"], ["kael", "vyznáva", "tichi"], ["tichi", "je rozšírené v", "ostrovy"], ["spev", "je viazaná na", "ostrovy"], ["popolni", "sídli v", "brana"], ["brana", "leží v", "varden"], ["noc", "sa odohrala v", "varden"], ["odo", "sa zúčastnil", "noc"], ["kult", "uctieva", "aurel"], ["tichi", "uctieva", "matka"], ["aurel", "je zdrojom", "runy"], ["matka", "je zdrojom", "spev"],
+    ["ilsa", "žije v", "brana", true, "do kapitoly 2"], ["kael", "slúži", "merwen", true, "pred útekom na ostrovy"], ["ilsa", "putuje do", "ostrovy"]];
+  const links = L.map(([a, label, b, past, when]) => Object.assign({ id: uid("l"), a: E[a], b: E[b], label: tl(label) }, past ? { past: true, when: tl(when) } : {}));
+  const items = {};
+  const T = (title, status, synopsis, html, extra = {}) => { const tid = uid("t"); html = trHtml(html); items[tid] = { html, notes: "" }; return Object.assign({ id: tid, type: "text", title: tl(title), status, synopsis: tl(synopsis), include: true, words: countWords(htmlToText(html)), ents: [] }, extra); };
+  const F = (title, kind, children, synopsis = "") => ({ id: uid("f"), type: "folder", kind, title: tl(title), open: true, synopsis: tl(synopsis), include: true, children });
+  const p1 = "<p>Iskry padali na udupanú hlinu ako zlaté semená, ktoré nikdy nevyklíčia. Ilsa ich sledovala spod privretých viečok a počítala údery otcovho kladiva. Dvadsaťtri. Pri dvadsiatom štvrtom vždy zastal, utrel si čelo a povedal, že železo treba počúvať.</p><p>Dnes nezastal.</p><p>„Otec?“ Zdvihla hlavu od mecha. V dielni páchlo uhlím a niečím ďalším – ostrým, kovovým, ako vzduch pred búrkou. Otec stál nad nákovou so zdvihnutou rukou a hľadel na podkovu, ktorú kul celé ráno.</p><p>Na jej rozžeravenom oblúku sa rozžiarila čiara. Tenká, rovná, a potom sa zalomila do tvaru, ktorý Ilsa nikdy nevidela, a predsa ho poznala. Tak ako človek pozná vlastné meno vyslovené v cudzom jazyku.</p><p>„Nepozeraj sa na to,“ zašepkal otec. Kladivo mu vypadlo z ruky. „Ilsa, nepozeraj sa na to.“</p><p>Ale ona sa už pozerala. A runa sa pozerala na ňu.</p>";
+  const p2 = "<p>V noci nemohla spať. Kedykoľvek zavrela oči, videla ten zalomený tvar, akoby jej ho niekto vypálil na vnútornú stranu viečok. Vstala, prešla bosá cez studenú kuchyňu a vošla do dielne.</p><p>Podkova ležala tam, kde ju otec nechal. Vychladnutá, obyčajná, sivá. Ilsa ju zdvihla a palcom prešla po mieste, kde predtým žiarila čiara. Nič.</p><p>Potom zobrala z poličky starý dláto a skôr, ako si to stihla rozmyslieť, ho priložila k železu.</p><p class=\"sb\">* * *</p><p>Ráno si nevedela spomenúť, akú farbu mali matkine oči.</p>";
+  const p3 = "<p>Klopali trikrát, pomaly, ako sa klope na dvere mŕtvych. Otec vstal od stola tak prudko, že prevrátil misku s kašou.</p><p>„Choď na povalu,“ povedal Ilse. Nekričal. To bolo horšie.</p><p>Cez škáry medzi doskami videla dvoch mužov v sivých plášťoch. Na štítoch mali čiernu ruku s roztiahnutými prstami. Popolní. Ten vyšší si dal dolu kapucňu a Ilsa zbadala, že je mladší, ako čakala – a že sa usmieva.</p>";
+  const binder = [
+    F("Kameň", "part", [
+      F("Kováčova dcéra", "chapter", [
+        T("Iskry", "hotovo", "Ilsa v otcovej dielni prvýkrát uvidí runu, ktorá sa sama objaví na rozžeravenej podkove.", p1, { pov: E.ilsa, place: E.varden, ents: [E.runy] }),
+        T("Runa pod kladivom", "revizia", "V noci Ilsa runu skúsi vyryť sama. Ráno zistí, akú cenu za to zaplatila.", p2, { pov: E.ilsa, place: E.varden, ents: [E.runy] }),
+      ], "Ilsin svet sa zmení jedným úderom kladiva."),
+      F("Popolní", "chapter", [
+        T("Klopanie v noci", "koncept", "Rad Popolných prichádza do kováčne. Otec ukryje Ilsu na povale.", p3, { pov: E.ilsa, ents: [E.popolni] }),
+        T("Útek", "napad", "Brat Odo vyvedie Ilsu tajnou cestou cez kryptu chrámu. Prvá zmienka o Siedmom plameni.", "", { pov: E.ilsa, ents: [E.odo, E.plamen] }),
+      ]),
+    ], "Prvá časť: Varden, runy a útek."),
+    F("Hmla", "part", [
+      F("Mlžné ostrovy", "chapter", [
+        T("Pieseň na prove", "napad", "Ilsa a Odo sa nalodia u pašeráka Kaela. V hmle počuť hlasy.", "", { pov: E.ilsa, place: E.ostrovy, ents: [E.kael, E.spev] }),
+      ]),
+    ]),
+  ];
+  const p = defaultProject({ title: tl("Sedem plameňov"), subtitle: tl("Ukážkový projekt"), author: tl("Ukážka"), genre: tl("Epická fantasy · ukážka"), binder, links, goals: { total: 100000, daily: 800 } });
+  const firstText = binder[0].children[0].children[0].id;
+  const ch1 = binder[0].children[0], ch2 = binder[0].children[1];
+  p.stickies = [
+    { id: uid("n"), text: tl("Ilsa by mala pri prvej rune cítiť aj chuť železa v ústach – vrátiť sa k tomu v kapitole 3."), cat: "zapracovat", refs: [ch1.children[0].id], done: false, created: Date.now(), updated: Date.now() },
+    { id: uid("n"), text: tl("Koľko rokov presne prešlo od Noci sklenených veží? Zjednotiť s Odovým vekom."), cat: "overit", refs: [ch2.id], done: false, created: Date.now(), updated: Date.now() },
+    { id: uid("n"), text: tl("Čo ak Kael kedysi slúžil u Popolných? Dalo by to jeho úteku na ostrovy iný význam."), cat: "napad", refs: [], done: false, created: Date.now(), updated: Date.now() },
+    { id: uid("n"), text: tl("Opakuje sa „ako“ v prvom odseku scény Iskry."), cat: "opravit", refs: [ch1.children[0].id], done: true, created: Date.now(), updated: Date.now() },
+  ];
+  for (const [iid, it] of Object.entries(items)) await Store.set(itemPath(id, iid), it);
+  for (const [eid, e] of Object.entries(ents)) await Store.set(entPath(id, eid), e);
+  p.words = 0; walk(binder, n => { if (n.type === "text") p.words += n.words; }); p.entCount = Object.keys(ents).length;
+  await Store.set(projPath(id), p);
+  await openProject(id, firstText);
+}
+</script>

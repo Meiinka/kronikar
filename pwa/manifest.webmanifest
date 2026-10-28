@@ -1,0 +1,19 @@
+{
+  "name": "Kronikár",
+  "short_name": "Kronikár",
+  "description": "Písacie štúdio pre fantasy: rukopis, svet, vzťahy a export knihy.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "lang": "sk",
+  "background_color": "#E8EBEF",
+  "theme_color": "#2E6B66",
+  "categories": ["productivity", "books"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

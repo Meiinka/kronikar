@@ -1,0 +1,257 @@
+<script>
+/* ================= relationship graph ================= */
+const SVGNS = "http://www.w3.org/2000/svg";
+let SIM = null;
+function stopSim() { if (SIM) { cancelAnimationFrame(SIM.raf); SIM = null; } }
+const G = { nodes: [], byId: {}, edges: [] };
+
+function renderGraph(main) {
+  const g = S.graph;
+  const ents = Object.values(S.ents);
+  if (!g.root || !S.ents[g.root]) { const deg = id => (S.p.links || []).filter(l => l.a === id || l.b === id).length; const pick = l => l.sort((a, b) => deg(b.id) - deg(a.id))[0]; g.root = (pick(entsBy("krajina")) || pick(entsBy("all")) || {}).id || null; }
+  main.innerHTML = `<div class="graph-wrap" style="flex:1">
+    <div class="graph-main">
+      <div class="gtools">
+        <div class="seg" role="group" aria-label="Zobrazenie"><button data-gm="net" class="${g.mode === "net" ? "on" : ""}">Sieť</button><button data-gm="tree" class="${g.mode === "tree" ? "on" : ""}">Strom</button></div>
+        ${g.mode === "tree" ? `<label class="chk" style="gap:6px"><span class="hint">Koreň</span><select class="inp" id="gRoot" style="width:auto;max-width:200px;padding:4px 8px">${allEntOptions().replace(`value="${g.root}"`, `value="${g.root}" selected`)}</select></label>` : ""}
+        <button class="btn sm" id="gLabels" aria-pressed="${g.labels}">Popisy vzťahov</button>
+        <button class="btn sm" id="gPast" aria-pressed="${g.showPast !== false}" title="Zobraziť aj vzťahy, ktoré už neplatia">Minulé vzťahy</button>
+        <button class="btn sm" id="gConnect" aria-pressed="${!!g.connect}">${I.link}Spájať</button>
+        ${g.mode === "net" ? `<button class="btn sm ghost" id="gRelayout">Rozložiť znova</button>` : ""}
+        <div class="gfilters">${CATS.filter(c => ents.some(e => e.cat === c.id)).map(c => `<button class="gfilter${g.off.has(c.id) ? " off" : ""}" data-gf="${c.id}" style="--cc:${catColor(c.id)}"><i></i>${c.name}</button>`).join("")}</div>
+      </div>
+      <svg class="graph" id="gsvg" role="img" aria-label="Mapa vzťahov">
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9z" fill="var(--ink-3)"/></marker>
+        <marker id="arrhi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9z" fill="var(--accent)"/></marker></defs>
+        <g id="gview"><g id="gedges"></g><g id="glabels"></g><g id="gnodes"></g></g>
+      </svg>
+      <div class="gzoom"><button class="btn" data-z="1.25" aria-label="Priblížiť">${I.plus}</button><button class="btn" data-z="0.8" aria-label="Oddialiť"><svg viewBox="0 0 16 16"><path d="M3 8h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button><button class="btn" id="gFit" aria-label="Prispôsobiť">${I.fit}</button></div>
+      <div class="ghint" id="ghint"></div>
+    </div>
+    <aside class="gside" id="gside"></aside>
+  </div>`;
+  $$("[data-gm]", main).forEach(b => b.onclick = () => { g.mode = b.dataset.gm; g.fitted = false; renderGraph(main); });
+  $("#gRoot")?.addEventListener("change", e => { g.root = e.target.value; g.fitted = false; buildGraph(); });
+  $("#gLabels").onclick = () => { g.labels = !g.labels; $("#gLabels").setAttribute("aria-pressed", g.labels); drawGraph(); };
+  $("#gPast").onclick = () => { g.showPast = g.showPast === false; $("#gPast").setAttribute("aria-pressed", g.showPast !== false); buildGraph(); };
+  $("#gConnect").onclick = () => { g.connect = !g.connect; g.src = null; g.pending = null; $("#gConnect").setAttribute("aria-pressed", g.connect); drawGraph(); renderGSide(); };
+  $("#gRelayout")?.addEventListener("click", () => { S.p.graphPos = {}; G.byId = {}; g.fitted = false; buildGraph(true); });
+  $$("[data-gf]", main).forEach(b => b.onclick = () => { const c = b.dataset.gf; g.off.has(c) ? g.off.delete(c) : g.off.add(c); b.classList.toggle("off"); g.fitted = false; buildGraph(); });
+  $$("[data-z]", main).forEach(b => b.onclick = () => { const svg = $("#gsvg").getBoundingClientRect(); zoomAt(svg.width / 2, svg.height / 2, +b.dataset.z); });
+  $("#gFit").onclick = fitGraph;
+  bindGraphPointer();
+  buildGraph();
+}
+function visibleEnts() { return Object.values(S.ents).filter(e => !S.graph.off.has(e.cat)); }
+function buildGraph(reheat) {
+  stopSim();
+  const g = S.graph, vis = visibleEnts(), vset = new Set(vis.map(e => e.id));
+  const links = (S.p.links || []).filter(l => vset.has(l.a) && vset.has(l.b) && (g.showPast !== false || !l.past));
+  const deg = {}; links.forEach(l => { deg[l.a] = (deg[l.a] || 0) + 1; deg[l.b] = (deg[l.b] || 0) + 1; });
+  const old = (G.lastMode === g.mode && !reheat) ? G.byId : {};
+  G.lastMode = g.mode;
+  G.nodes = vis.map(e => { const o = old[e.id] || {}; return { id: e.id, e, r: 8 + Math.min(11, (deg[e.id] || 0) * 1.6), x: o.x, y: o.y, vx: 0, vy: 0 }; });
+  G.byId = Object.fromEntries(G.nodes.map(n => [n.id, n]));
+  G.edges = links.map(l => ({ l, s: G.byId[l.a], t: G.byId[l.b], tree: false }));
+  G.hidden = 0;
+  if (g.mode === "tree") layoutTree();
+  else {
+    const pos = S.p.graphPos || {}, ci = Object.fromEntries(CATS.map((c, i) => [c.id, i]));
+    let fresh = 0;
+    G.nodes.forEach(n => {
+      if (n.x == null) {
+        const p = pos[n.id];
+        if (p) { n.x = p[0]; n.y = p[1]; }
+        else { const a = (ci[n.e.cat] || 0) / CATS.length * Math.PI * 2 + (Math.random() - .5) * .7, rr = 160 + Math.random() * 120; n.x = Math.cos(a) * rr; n.y = Math.sin(a) * rr; fresh++; }
+      }
+    });
+    if (fresh || reheat) runSim(fresh > 0 && fresh === G.nodes.length ? 1 : .6);
+  }
+  drawGraph(true);
+  if (!g.fitted) { requestAnimationFrame(fitGraph); g.fitted = true; }
+  renderGSide();
+}
+function layoutTree() {
+  const g = S.graph, root = G.byId[g.root];
+  G.nodes.forEach(n => { n.inTree = false; });
+  if (!root) { G.hidden = G.nodes.length; return; }
+  const adj = {}; G.edges.forEach(ed => { (adj[ed.s.id] = adj[ed.s.id] || []).push(ed); (adj[ed.t.id] = adj[ed.t.id] || []).push(ed); });
+  const kids = {}, seen = new Set([root.id]), order = [root];
+  root.depth = 0;
+  for (let i = 0; i < order.length; i++) {
+    const cur = order[i];
+    const nb = (adj[cur.id] || []).map(ed => ({ ed, o: ed.s === cur ? ed.t : ed.s }))
+      .sort((a, b) => CATS.findIndex(c => c.id === a.o.e.cat) - CATS.findIndex(c => c.id === b.o.e.cat) || a.o.e.name.localeCompare(b.o.e.name, "sk"));
+    for (const { ed, o } of nb) { if (seen.has(o.id)) continue; seen.add(o.id); o.depth = cur.depth + 1; ed.tree = true; (kids[cur.id] = kids[cur.id] || []).push(o); order.push(o); }
+  }
+  let y = 0;
+  const place = n => { n.inTree = true; const ks = kids[n.id] || []; n.x = n.depth * 250; if (!ks.length) { n.y = y; y += 56; } else { ks.forEach(place); n.y = (ks[0].y + ks[ks.length - 1].y) / 2; } };
+  place(root);
+  G.hidden = G.nodes.filter(n => !n.inTree).length;
+  G.nodes = G.nodes.filter(n => n.inTree);
+  G.edges = G.edges.filter(ed => ed.s.inTree && ed.t.inTree);
+}
+function runSim(alpha = 1) {
+  stopSim();
+  const sim = SIM = { alpha, raf: 0 };
+  const step = () => {
+    if (SIM !== sim) return;
+    const N = G.nodes, a = sim.alpha;
+    for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
+      const p = N[i], q = N[j]; let dx = q.x - p.x, dy = q.y - p.y, d2 = dx * dx + dy * dy || .01;
+      if (d2 > 360000) continue;
+      const f = 7000 / d2 * a, d = Math.sqrt(d2); dx /= d; dy /= d;
+      if (!p.fx) { p.vx -= dx * f; p.vy -= dy * f; } if (!q.fx) { q.vx += dx * f; q.vy += dy * f; }
+    }
+    G.edges.forEach(({ s, t }) => { const dx = t.x - s.x, dy = t.y - s.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 170) * .03 * a; const ux = dx / d * f, uy = dy / d * f; if (!s.fx) { s.vx += ux; s.vy += uy; } if (!t.fx) { t.vx -= ux; t.vy -= uy; } });
+    N.forEach(n => { if (n.fx) { n.vx = n.vy = 0; return; } n.vx -= n.x * .004 * a; n.vy -= n.y * .004 * a; n.vx *= .82; n.vy *= .82; n.x += Math.max(-30, Math.min(30, n.vx)); n.y += Math.max(-30, Math.min(30, n.vy)); });
+    sim.alpha *= .985;
+    drawPositions();
+    if (sim.alpha > .02) sim.raf = requestAnimationFrame(step);
+    else { SIM = null; savePositions(); }
+  };
+  sim.raf = requestAnimationFrame(step);
+}
+function savePositions() { if (S.graph.mode !== "net") return; const pos = S.p.graphPos = S.p.graphPos || {}; G.nodes.forEach(n => pos[n.id] = [Math.round(n.x), Math.round(n.y)]); saveProject(); }
+
+function edgePts(s, t) {
+  const dx = t.x - s.x, dy = t.y - s.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+  return [s.x + dx / d * (s.r + 2), s.y + dy / d * (s.r + 2), t.x - dx / d * (t.r + 4), t.y - dy / d * (t.r + 4)];
+}
+function edgePath(ed) {
+  const { s, t } = ed;
+  if (S.graph.mode === "tree") {
+    const [x1, y1, x2, y2] = s.x <= t.x ? [s.x + s.r + 2, s.y, t.x - t.r - 4, t.y] : [s.x - s.r - 2, s.y, t.x + t.r + 4, t.y];
+    if (Math.abs(s.x - t.x) < 1) { const p = edgePts(s, t); return `M${p[0]},${p[1]} L${p[2]},${p[3]}`; }
+    const mx = (x1 + x2) / 2; return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
+  }
+  const p = edgePts(s, t); return `M${p[0]},${p[1]} L${p[2]},${p[3]}`;
+}
+function drawGraph() {
+  const ge = $("#gedges"), gl = $("#glabels"), gn = $("#gnodes"); if (!ge) return;
+  const g = S.graph, sel = g.sel && G.byId[g.sel] ? g.sel : null;
+  const nb = new Set(); if (sel) { nb.add(sel); G.edges.forEach(ed => { if (ed.s.id === sel) nb.add(ed.t.id); if (ed.t.id === sel) nb.add(ed.s.id); }); }
+  ge.innerHTML = G.edges.map((ed, i) => { const hi = sel && (ed.s.id === sel || ed.t.id === sel); if (g.mode === "tree" && !ed.tree && !hi) return ""; return `<path class="edge${ed.l.past ? " past" : ""}${g.mode === "tree" && !ed.tree ? " extra" : ""}${hi ? " hi" : ""}${sel && !hi ? " dim" : ""}" data-ei="${i}" marker-end="url(#${hi ? "arrhi" : "arr"})" d="${edgePath(ed)}"/>`; }).join("");
+  gl.innerHTML = g.labels ? G.edges.map((ed, i) => (g.mode === "tree" && !ed.tree) ? "" : `<text class="elab${sel && !(ed.s.id === sel || ed.t.id === sel) ? " dim" : ""}" data-li="${i}" text-anchor="middle"></text>`).join("") : "";
+  $$("text[data-li]", gl).forEach(t => { const l = G.edges[+t.dataset.li].l; t.textContent = l.label + (l.past ? " (predtým)" : ""); if (l.past) t.classList.add("past"); });
+  gn.innerHTML = G.nodes.map(n => `<g class="node${sel && !nb.has(n.id) ? " dim" : ""}${n.id === sel ? " sel" : ""}${n.id === g.src ? " src" : ""}" data-n="${n.id}" tabindex="0" role="button" aria-label="${esc(n.e.name)}"><circle r="${n.r}" fill="${catColor(n.e.cat)}"/><text text-anchor="${g.mode === "tree" ? "start" : "middle"}"></text><title></title></g>`).join("");
+  $$("g.node", gn).forEach(el => { const n = G.byId[el.dataset.n]; el.querySelector("text").textContent = n.e.name || "Bez mena"; el.querySelector("title").textContent = (CAT[n.e.cat]?.one || "") + (n.e.summary ? ": " + n.e.summary : ""); el.onkeydown = ev => { if (ev.key === "Enter") nodeClick(n.id); }; });
+  drawPositions();
+  const hint = $("#ghint");
+  if (hint) hint.textContent = !G.nodes.length ? (Object.keys(S.ents).length ? "Žiadne záznamy pre zvolený filter." : "Svet je prázdny – pridaj záznamy v sekcii Svet.")
+    : g.connect ? (g.src ? "Teraz klikni na druhý záznam." : "Klikni na záznam, z ktorého vedie vzťah.")
+    : g.mode === "tree" ? (G.hidden ? `${G.hidden} ${plural(G.hidden, "záznam nie je", "záznamy nie sú", "záznamov nie je")} prepojených s koreňom.` : "Strom zobrazuje všetko, čo vedie z koreňa.")
+    : "Ťahaj uzly, koliesko myši približuje. Klik vyberie záznam.";
+}
+function drawPositions() {
+  const gn = $("#gnodes"); if (!gn) return;
+  const tree = S.graph.mode === "tree";
+  $$("g.node", gn).forEach(el => { const n = G.byId[el.dataset.n]; el.setAttribute("transform", `translate(${n.x},${n.y})`); const t = el.querySelector("text"); if (tree) { t.setAttribute("x", n.r + 6); t.setAttribute("y", 4); } else { t.setAttribute("x", 0); t.setAttribute("y", n.r + 14); } });
+  $$("#gedges path").forEach(p => p.setAttribute("d", edgePath(G.edges[+p.dataset.ei])));
+  $$("#glabels text").forEach(t => {
+    const ed = G.edges[+t.dataset.li]; let x = (ed.s.x + ed.t.x) / 2, y = (ed.s.y + ed.t.y) / 2;
+    if (tree) { const [p, c] = ed.s.x < ed.t.x ? [ed.s, ed.t] : [ed.t, ed.s]; t.setAttribute("text-anchor", "end"); t.setAttribute("x", c.x - c.r - 10); t.setAttribute("y", c.y - 6); return; }
+    t.setAttribute("x", x); t.setAttribute("y", y - 3);
+  });
+}
+function applyView() { const v = S.graph.view, gv = $("#gview"); if (gv) gv.setAttribute("transform", `translate(${v.x},${v.y}) scale(${v.k})`); }
+function zoomAt(cx, cy, f) { const v = S.graph.view, k = Math.max(.2, Math.min(3, v.k * f)); v.x = cx - (cx - v.x) * k / v.k; v.y = cy - (cy - v.y) * k / v.k; v.k = k; applyView(); }
+function fitGraph() {
+  const svg = $("#gsvg"); if (!svg || !G.nodes.length) { applyView(); return; }
+  const r = svg.getBoundingClientRect(); if (!r.width) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  G.nodes.forEach(n => { x0 = Math.min(x0, n.x - 40); x1 = Math.max(x1, n.x + (S.graph.mode === "tree" ? 190 : 60)); y0 = Math.min(y0, n.y - 30); y1 = Math.max(y1, n.y + 36); });
+  const k = Math.max(.25, Math.min(1.4, Math.min((r.width - 40) / (x1 - x0), (r.height - 70) / (y1 - y0))));
+  S.graph.view = { k, x: (r.width - (x1 - x0) * k) / 2 - x0 * k, y: (r.height - 40 - (y1 - y0) * k) / 2 - y0 * k };
+  applyView();
+}
+function bindGraphPointer() {
+  const svg = $("#gsvg"); let drag = null;
+  const toG = (cx, cy) => { const r = svg.getBoundingClientRect(), v = S.graph.view; return [(cx - r.left - v.x) / v.k, (cy - r.top - v.y) / v.k]; };
+  svg.addEventListener("wheel", e => { e.preventDefault(); const r = svg.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * .0015)); }, { passive: false });
+  svg.addEventListener("pointerdown", e => {
+    const nodeEl = e.target.closest("g.node");
+    drag = { id: nodeEl ? nodeEl.dataset.n : null, sx: e.clientX, sy: e.clientY, moved: false, vx: S.graph.view.x, vy: S.graph.view.y };
+    svg.setPointerCapture(e.pointerId);
+    if (!nodeEl) svg.classList.add("panning");
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (!drag.moved) return;
+    if (drag.id && S.graph.mode === "net") {
+      const n = G.byId[drag.id]; const [x, y] = toG(e.clientX, e.clientY); n.x = x; n.y = y; n.fx = true;
+      if (!SIM) runSim(.25); else SIM.alpha = Math.max(SIM.alpha, .25);
+      drawPositions();
+    } else if (!drag.id || S.graph.mode === "tree") { S.graph.view.x = drag.vx + dx; S.graph.view.y = drag.vy + dy; applyView(); }
+  });
+  const end = e => {
+    if (!drag) return; svg.classList.remove("panning");
+    const d = drag; drag = null;
+    if (d.id && G.byId[d.id]) G.byId[d.id].fx = false;
+    if (!d.moved) { if (d.id) nodeClick(d.id); else if (S.graph.sel && !S.graph.connect) { S.graph.sel = null; drawGraph(); renderGSide(); } }
+    else if (d.id && S.graph.mode === "net" && !SIM) savePositions();
+  };
+  svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
+}
+function nodeClick(id) {
+  const g = S.graph;
+  if (g.connect) {
+    if (!g.src) { g.src = id; g.pending = null; }
+    else if (g.src === id) { g.src = null; }
+    else { g.pending = { a: g.src, b: id }; g.src = null; }
+    drawGraph(); renderGSide();
+    setTimeout(() => $("#gpLabel")?.focus(), 30);
+    return;
+  }
+  g.sel = g.sel === id ? null : id; drawGraph(); renderGSide();
+}
+function renderGSide() {
+  const el = $("#gside"); if (!el) return;
+  const g = S.graph;
+  if (g.pending && S.ents[g.pending.a] && S.ents[g.pending.b]) {
+    const a = S.ents[g.pending.a], b = S.ents[g.pending.b];
+    el.innerHTML = `<span class="lbl">Nové prepojenie</span>
+      <div class="chips"><span class="chip link"><span class="cd" style="background:${catColor(a.cat)}"></span>${esc(a.name)}</span><span class="hint">→</span><span class="chip link"><span class="cd" style="background:${catColor(b.cat)}"></span>${esc(b.name)}</span></div>
+      <label class="field"><span>Vzťah</span><input class="inp" id="gpLabel" list="gpSug" placeholder="napr. ovláda" autocomplete="off"></label>
+      <datalist id="gpSug">${relSuggest(a.cat, b.cat).map(s => `<option value="${esc(s)}">`).join("")}</datalist>
+      <div class="chips">${relSuggest(a.cat, b.cat).slice(0, 6).map(s => `<button class="chip link" data-sugg="${esc(s)}">${esc(s)}</button>`).join("")}</div>
+      <div class="btnrow"><button class="btn primary" id="gpSave">Uložiť vzťah</button><button class="btn" id="gpSwap">Otočiť smer</button><button class="btn ghost" id="gpCancel">Zrušiť</button></div>`;
+    const save = () => { S.p.links.push({ id: uid("l"), a: g.pending.a, b: g.pending.b, label: $("#gpLabel").value.trim() || "súvisí s" }); g.pending = null; saveProject(); buildGraph(); toast("Prepojenie uložené."); };
+    $("#gpSave").onclick = save; $("#gpLabel").onkeydown = e => { if (e.key === "Enter") save(); };
+    $$("[data-sugg]", el).forEach(b => b.onclick = () => { $("#gpLabel").value = b.dataset.sugg; $("#gpLabel").focus(); });
+    $("#gpSwap").onclick = () => { g.pending = { a: g.pending.b, b: g.pending.a }; renderGSide(); };
+    $("#gpCancel").onclick = () => { g.pending = null; renderGSide(); };
+    return;
+  }
+  const e = g.sel && S.ents[g.sel];
+  if (!e) {
+    const nL = (S.p.links || []).length, nE = Object.keys(S.ents).length;
+    el.innerHTML = `<span class="lbl">Mapa vzťahov</span>
+      <p class="muted" style="margin:0">${nf(nE)} ${plural(nE, "záznam", "záznamy", "záznamov")}, ${nf(nL)} ${plural(nL, "prepojenie", "prepojenia", "prepojení")}. Veľkosť uzla zodpovedá počtu prepojení.</p>
+      <div class="insp-sec"><span class="lbl">Legenda</span>${CATS.map(c => `<div class="chk"><span style="width:11px;height:11px;border-radius:50%;background:${catColor(c.id)}"></span>${c.name}</div>`).join("")}</div>
+      <div class="insp-sec"><span class="lbl">Ako na to</span><span class="hint"><b>Sieť</b> ukazuje celý svet naraz. <b>Strom</b> vychádza z jedného koreňa – napríklad krajina → jej postavy → ich viera a mágia.</span><span class="hint">Tlačidlom <b>Spájať</b> klikneš na dva záznamy a pomenuješ vzťah.</span></div>`;
+    return;
+  }
+  const links = entLinks(e.id).filter(l => !g.off.has(S.ents[l.a].cat) || true);
+  el.innerHTML = `<div style="--cc:${catColor(e.cat)}"><span class="badge">${esc(CAT[e.cat]?.one)}</span></div>
+    <h3 style="font-family:var(--f-display);font-size:22px;margin:0;line-height:1.2">${esc(e.name || "Bez mena")}</h3>
+    ${e.summary ? `<p class="muted" style="margin:0;font-family:var(--f-display);font-style:italic">${esc(e.summary)}</p>` : ""}
+    <div class="btnrow"><button class="btn sm primary" id="gOpen">Otvoriť vo Svete</button><button class="btn sm" id="gAsRoot">${I.tree}Strom odtiaľto</button></div>
+    <div class="insp-sec"><span class="lbl">Prepojenia</span>${links.length ? `<div class="rels">${links.slice().sort((a, b) => (a.past ? 1 : 0) - (b.past ? 1 : 0)).map(l => { const out = l.a === e.id, o = S.ents[out ? l.b : l.a]; return `<div class="rel${l.past ? " past" : ""}" style="grid-template-columns:minmax(0,1fr) auto auto"><button class="tgt" data-gsel="${o.id}"><span class="cd" style="background:${catColor(o.cat)}"></span><span><i class="hint">${out ? esc(l.label) + " →" : "← " + esc(l.label)}</i> ${esc(o.name)}${l.when ? ` <small class="hint">· ${esc(l.when)}</small>` : ""}</span></button><button class="btn sm ghost pastbtn" data-gpast="${l.id}" title="Prepnúť aktuálny / minulý">${l.past ? "minulý" : "aktuálny"}</button><button class="btn icon ghost" data-grm="${l.id}" title="Odstrániť">×</button></div>`; }).join("")}</div>` : '<div class="empty">Bez prepojení.</div>'}</div>
+    <div class="insp-sec"><span class="lbl">Rýchlo prepojiť</span>
+      <input class="inp" id="gqLabel" list="gqSug" placeholder="Vzťah (napr. vyznáva)" autocomplete="off"><datalist id="gqSug"></datalist>
+      <select class="inp" id="gqTarget"><option value="">S čím…</option>${allEntOptions([e.id])}</select>
+      <button class="btn" id="gqAdd">${I.link}Prepojiť</button></div>`;
+  $("#gOpen").onclick = () => openEnt(e.id);
+  $("#gAsRoot").onclick = () => { g.root = e.id; g.mode = "tree"; g.fitted = false; renderGraph($("#main")); };
+  $$("[data-gsel]", el).forEach(b => b.onclick = () => { g.sel = b.dataset.gsel; drawGraph(); renderGSide(); });
+  $$("[data-gpast]", el).forEach(b => b.onclick = () => { const l = S.p.links.find(x => x.id === b.dataset.gpast); if (l) { l.past = !l.past; saveProject(); buildGraph(); } });
+  $$("[data-grm]", el).forEach(b => b.onclick = () => { S.p.links = S.p.links.filter(l => l.id !== b.dataset.grm); saveProject(); buildGraph(); });
+  const tg = $("#gqTarget"), sug = () => { const o = S.ents[tg.value]; $("#gqSug").innerHTML = relSuggest(e.cat, o ? o.cat : "").map(s => `<option value="${esc(s)}">`).join(""); };
+  sug(); tg.onchange = sug;
+  $("#gqAdd").onclick = () => { if (!tg.value) { toast("Vyber cieľový záznam."); return; } S.p.links.push({ id: uid("l"), a: e.id, b: tg.value, label: $("#gqLabel").value.trim() || "súvisí s" }); saveProject(); buildGraph(); toast("Prepojené."); };
+}
+window.addEventListener("resize", debounce(() => { if (S.mode === "graph") fitGraph(); }, 300));
+</script>
