@@ -1,7 +1,7 @@
 INSTALL = {
  "title": "Installation and sync",
  "subtitle": "How to install Kronikár on Windows, macOS and Android, where it stores your projects, and how to keep them identical on every device.",
- "meta_left": "Kronikár 1.35", "meta_right": "Guide 1 / 2",
+ "meta_left": "Kronikár 1.35.1", "meta_right": "Guide 1 / 2",
  "toc_title": "Contents", "hero": "home",
  "sections": [
   {"title": "What you need", "toc": "devices, files, browser", "blocks": [
@@ -134,7 +134,7 @@ INSTALL = {
 USAGE = {
  "title": "Writing with Kronikár",
  "subtitle": "Manuscript, world, maps, magical currents, relationships, time, notes and exporting your book – everything Kronikár can do, step by step.",
- "meta_left": "Kronikár 1.35", "meta_right": "Guide 2 / 2",
+ "meta_left": "Kronikár 1.35.1", "meta_right": "Guide 2 / 2",
  "toc_title": "Contents", "hero": "write",
  "sections": [
   {"title": "Overview", "toc": "sections, top bar, sample", "blocks": [
@@ -337,7 +337,7 @@ USAGE = {
      "Every place has a **Magical currents** card with a coloured bar – the mix of currents in it.",
    ]),
    ("h3", "Find a place for a portal"),
-   ("p", "In a current's entry or above the World list. Choose the current, minimum density, what to measure from (the silver tree is offered automatically), a map and a maximum distance. Suitable places are at the top with a green line; the distance uses the map's scale."),
+   ("p", "In a current's entry or above the World list. Choose the current, minimum density, what to measure from (for example a shrine or a capital), a map and a maximum distance. Suitable places are at the top with a green line; the distance uses the map's scale."),
    ("fig", "portal", "Finding a place for a portal."),
    ("warn", "Map scale", "Without a scale the distance cannot be calculated. Set it on the map under [[Journeys]] (map width in km)."),
   ]},

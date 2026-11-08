@@ -33,7 +33,7 @@ Object.assign(EN, {"Polia vo Vlastnostiach":"Fields in Properties",
 "Tu sa poskladá všetko, čo sa na tomto mieste stalo: vznik, udalosti, scény, kto tu žil a kedy. Stačí pridať prepojenia s časom, udalosti alebo nastaviť miesto deja scény.":"Everything that happened at this place comes together here: its founding, events, scenes, who lived here and when. Just add links with a time, events, or set it as the setting of a scene.",
 "Hľadať miesto pre portál":"Find a place for a portal",
 "Najprv pridaj aspoň jeden magický prúd.":"Add at least one magical current first.",
-"Portál potrebuje dosť hustý prúd a vzdialenosť od stredu (napr. od striebrostromu). Vzdialenosť sa počíta z mapy, na ktorej sú obe miesta, podľa jej mierky (šírka mapy v km).":"A portal needs a dense enough current and a distance from a centre (e.g. the silver tree). The distance is measured on a map that has both places, using its scale (map width in km).",
+"Portál potrebuje dosť hustý prúd a vzdialenosť od stredu (napr. od svätyne alebo hlavného mesta). Vzdialenosť sa počíta z mapy, na ktorej sú obe miesta, podľa jej mierky (šírka mapy v km).":"A portal needs a dense enough current and a distance from a centre (e.g. a shrine or a capital). The distance is measured on a map that has both places, using its scale (map width in km).",
 "Prúd":"Current",
 "Hustota aspoň":"Density at least",
 "Merať od (stred)":"Measure from (centre)",
@@ -54,3 +54,4 @@ Object.assign(EN, {"Motív":"Theme",
 "Svetlý":"Light",
 "Tmavý":"Dark",
 "Platí len pre toto zariadenie.":"Applies to this device only."});
+Object.assign(EN, {"formuje":"shapes"});

@@ -4,7 +4,7 @@ FORK = "https://f-droid.org/packages/com.github.catfriend1.syncthingfork/"
 INSTALL = {
  "title": "Inštalácia a synchronizácia",
  "subtitle": "Ako Kronikár nainštalovať na Windows, macOS a Android, kam ukladá projekty a ako ich mať rovnaké na všetkých zariadeniach.",
- "meta_left": "Kronikár 1.35", "meta_right": "Návod 1 / 2",
+ "meta_left": "Kronikár 1.35.1", "meta_right": "Návod 1 / 2",
  "toc_title": "Obsah", "hero": "home",
  "sections": [
   {"title": "Čo budeš potrebovať", "toc": "zariadenia, súbory, prehliadač", "blocks": [
@@ -137,7 +137,7 @@ INSTALL = {
 USAGE = {
  "title": "Ako písať v Kronikári",
  "subtitle": "Rukopis, svet, mapy, magické prúdy, vzťahy, čas, poznámky a export knihy – všetko, čo Kronikár vie, krok za krokom.",
- "meta_left": "Kronikár 1.35", "meta_right": "Návod 2 / 2",
+ "meta_left": "Kronikár 1.35.1", "meta_right": "Návod 2 / 2",
  "toc_title": "Obsah", "hero": "write",
  "sections": [
   {"title": "Prehľad", "toc": "sekcie, horná lišta, ukážka", "blocks": [
@@ -340,7 +340,7 @@ USAGE = {
      "Každé miesto má kartu **Magické prúdy** s farebným pruhom – mixom prúdov, ktoré v ňom sú.",
    ]),
    ("h3", "Hľadať miesto pre portál"),
-   ("p", "V karte prúdu alebo nad zoznamom Sveta. Vyber prúd, hustotu aspoň, od čoho merať (striebrostrom sa ponúkne sám), mapu a najviac km. Vhodné miesta sú hore so zelenou čiarou; vzdialenosť sa počíta podľa mierky mapy."),
+   ("p", "V karte prúdu alebo nad zoznamom Sveta. Vyber prúd, hustotu aspoň, od čoho merať (napríklad svätyňa alebo hlavné mesto), mapu a najviac km. Vhodné miesta sú hore so zelenou čiarou; vzdialenosť sa počíta podľa mierky mapy."),
    ("fig", "portal", "Hľadanie miesta pre portál."),
    ("warn", "Mierka mapy", "Bez mierky sa vzdialenosť nedá spočítať. Zadáš ju na mape v [[Cesty postáv]] (šírka mapy v km)."),
   ]},

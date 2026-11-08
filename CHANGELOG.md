@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.35.1
+- Magical currents: neutral wording – the field “Who works with it” (existing text is moved over automatically), relationship suggestions “controls” and “shapes”, and generic examples in the portal finder and structure hints.
+- User guides: new screenshots with neutral sample names; the theme button is visible in the top bar.
+
 ## 1.35
 - **Light or dark theme by choice:** a sun / moon button in the top bar switches Follow the system → Light → Dark; the same choice is under Project → Theme. It is remembered per device, so a phone can be dark and a computer light.
 
@@ -14,7 +18,7 @@
 - **Character gallery:** all characters as cards with photo, role, nickname and age in the story, filterable by role and printable (or saved as HTML on Android).
 - **Compare two entries** side by side: fields, custom fields, name forms, age, time, currents, links, shared links and mentions; “Differences only” hides matching rows.
 - **History of a place:** a card in each place's entry that lists in time order its founding, events, scenes set there, and who lived there or was linked with it and when; items without an exact time follow below.
-- **Find a place for a portal:** choose a current, minimum density, a centre (e.g. the silver tree), a map and a maximum distance – the list shows the places with the current, their density, distance in km by the map scale, structure and other currents, suitable ones first.
+- **Find a place for a portal:** choose a current, minimum density, a centre (e.g. a shrine or a capital), a map and a maximum distance – the list shows the places with the current, their density, distance in km by the map scale, structure and other currents, suitable ones first.
 - **Currents in map export:** JPG and SVG can include the current colour layer (all currents or the one picked), with the currents in the legend.
 - **Faster with big books:** cached text of scenes and name patterns – opening a character in a book with 100 chapters and 200 characters went from about 2.2 s to 0.25 s, the timeline from 3.6 s to 0.2 s.
 
@@ -34,10 +38,10 @@
 - **Character plot line:** a card in each character's entry for what the story will bring her and what she must resolve – each item with a rough place in the story (beginning, first quarter, middle, three quarters, end – or anything in between with a slider), an optional chapter and a “done” tick. A track above shows all items along the story, done ones in green, with a done / total count.
 
 ## 1.29
-- **Magical currents:** a new World category. Each current has a colour and fields for its essence, structure, how it bends and behaves, who works with it (benders, weavers…), how it shows, cost and risks.
+- **Magical currents:** a new World category. Each current has a colour and fields for its essence, structure, how it bends and behaves, who works with it, how it shows, cost and risks.
 - **Occurrence and density:** in a current's entry, a table of where it occurs – places, animals, races, objects or plain words (water, desert) – with density 0–5 (also the saturation of its colour), the structure it has there and a note. Every source shows its own mix of currents as a coloured bar and can add or adjust them too.
 - **Currents on maps:** “Currents” on a map tints areas and pins linked to places by the currents in them – the denser, the deeper – and can show a single current only.
-- Relationship suggestions for currents: strengthens, weakens, cancels, bends towards, repels, mixes with, arises from; for characters: bends, weaves and structures, senses, draws from.
+- Relationship suggestions for currents: strengthens, weakens, cancels, bends towards, repels, mixes with, arises from; for characters: controls, shapes, senses, draws from.
 
 ## 1.28
 - **Places on maps:** every place in the World list shows on how many maps it is (pin, area, route or symbol), places on no map are marked, and “Places” can be filtered to On a map / No map.

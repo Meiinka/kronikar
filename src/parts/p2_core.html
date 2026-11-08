@@ -75,7 +75,7 @@ const BASE_CATS = [
   { id: "nabozenstvo", name: "Náboženstvá", one: "Náboženstvo", fields: ["Božstvá", "Učenie a dogmy", "Rituály a sviatky", "Kňazstvo", "Symboly", "Postoj k mágii"] },
   { id: "bozstvo", name: "Mytológia", one: "Mytológia", fields: [{ n: "Druh", key: true, opts: ["Hlavné božstvo", "Nižšie božstvo", "Prastaré / prvotné božstvo", "Božská entita", "Zabudnuté či mŕtve božstvo", "Falošné božstvo", "Polobožstvo", "Zbožštený hrdina / zakladateľ", "Zbožštený smrteľník", "Svätec / prorok", "Vyvolený bohov", "Duch", "Démon", "Mýtický tvor", "Strážca", "Svetový strom / kozmická sila", "Posvätný predmet či miesto z mýtov"] }, "Doména / čo stelesňuje", "Podoba a prejavy", "Pôvod, mýty a legendy", "Kult a svätyne", "Symboly a posvätné predmety", "Moc a obmedzenia", "Vzťah k smrteľníkom"] },
   { id: "magia", name: "Mágia", one: "Magický systém", fields: ["Zdroj moci", "Pravidlá", "Cena a obmedzenia", "Kto ju ovláda", "Prejavy a kúzla", "Postoj spoločnosti"] },
-  { id: "prud", name: "Magické prúdy", one: "Magický prúd", fields: [{ n: "Druh", key: true, soft: true, opts: ["Živelný", "Životný", "Duchovný", "Kozmický", "Zmiešaný"] }, "Podstata", "Štruktúra (ako vyzerá, z čoho sa skladá)", "Ako sa ohýba a správa", "Kto s ním pracuje (prúdnici, splietači…)", "Ako sa prejavuje", "Cena a riziká", "Vzťah k iným prúdom"] },
+  { id: "prud", name: "Magické prúdy", one: "Magický prúd", fields: [{ n: "Druh", key: true, soft: true, opts: ["Živelný", "Životný", "Duchovný", "Kozmický", "Zmiešaný"] }, "Podstata", "Štruktúra (ako vyzerá, z čoho sa skladá)", "Ako sa ohýba a správa", "Kto s ním pracuje", "Ako sa prejavuje", "Cena a riziká", "Vzťah k iným prúdom"] },
   { id: "frakcia", name: "Rody a frakcie", one: "Frakcia", fields: ["Vodca", "Ciele", "Sídlo", "Znak a farby", "Spojenci a nepriatelia"] },
   { id: "predmet", name: "Artefakty", one: "Artefakt", fields: ["Pôvod", "Schopnosti", "Súčasný držiteľ", "Podoba"] },
   { id: "pojem", name: "Slovník", one: "Pojem", fields: [{ n: "Druh", key: true, soft: true, opts: ["Slovo", "Meno", "Titul", "Zaklínadlo / kúzlo", "Nadávka / kliatba", "Pozdrav", "Iné"] }, "Výslovnosť", "Význam", "Jazyk / pôvod"] },
@@ -95,6 +95,7 @@ const mythGroup = kind => { const k = (kind || "").trim().toLowerCase(); if (!k)
 /* older books: deity fields renamed in 1.26 – move the values, nothing is lost */
 const MYTH_RENAME = { "Druh boha": "Druh", "Doména (čomu vládne)": "Doména / čo stelesňuje", "Mýty a legendy": "Pôvod, mýty a legendy", "Uctievači a kult": "Kult a svätyne" };
 function migrateEnt(e) {
+  if (e && e.cat === "prud" && e.fields) { const n = "Kto s ním pracuje", o = Object.keys(e.fields).find(k => k !== n && k.startsWith(n + " (")); if (o) { const v = e.fields[o]; delete e.fields[o]; e.fields[n] = (e.fields[n] || "").trim() ? e.fields[n] + (v ? "\n" + v : "") : v; return true; } return false; }
   if (!e || e.cat !== "bozstvo" || !e.fields) return false; let ch = false;
   Object.entries(MYTH_RENAME).forEach(([o, n]) => { if (o in e.fields) { const v = e.fields[o]; delete e.fields[o]; if (v && !(e.fields[n] || "").trim()) e.fields[n] = v; else if (v) e.fields[n] += "\n" + v; ch = true; } });
   return ch;
@@ -129,7 +130,7 @@ const REL_SUGGEST = {
   "postava>magia": ["ovláda", "učí sa", "je imúnny voči", "bojí sa"], "magia>postava": ["poznačila"],
   "krajina>nabozenstvo": ["vyznáva", "zakazuje", "toleruje"], "nabozenstvo>krajina": ["je rozšírené v", "vzniklo v", "má svätyňu v"],
   "nabozenstvo>magia": ["uznáva", "zakazuje", "je zdrojom"], "magia>nabozenstvo": ["je zakázaná v", "pochádza z"],
-  "prud>prud": ["posilňuje", "oslabuje", "ruší", "ohýba sa k", "odpudzuje", "mieša sa s", "vzniká zo"], "postava>prud": ["ohýba (prúdnik)", "splieta a štruktúruje", "vníma", "čerpá z", "nevidí"], "prud>krajina": ["je silný v", "je slabý v", "zbieha sa v"], "prud>predmet": ["napĺňa", "je uväznený v"], "rasa>prud": ["vníma", "ovláda", "je imúnna voči"], "prud>magia": ["je základom"], "magia>prud": ["čerpá z", "ohýba"],
+  "prud>prud": ["posilňuje", "oslabuje", "ruší", "ohýba sa k", "odpudzuje", "mieša sa s", "vzniká zo"], "postava>prud": ["ovláda", "formuje", "vníma", "čerpá z", "nevidí"], "prud>krajina": ["je silný v", "je slabý v", "zbieha sa v"], "prud>predmet": ["napĺňa", "je uväznený v"], "rasa>prud": ["vníma", "ovláda", "je imúnna voči"], "prud>magia": ["je základom"], "magia>prud": ["čerpá z", "ohýba"],
   "krajina>magia": ["zakazuje", "je zdrojom", "chráni"], "magia>krajina": ["pochádza z", "je viazaná na"],
   "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil"],
   "postava>frakcia": ["vedie", "je členom", "zradil"], "frakcia>krajina": ["sídli v", "vládne", "bojuje proti"],

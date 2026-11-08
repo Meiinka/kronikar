@@ -244,16 +244,16 @@ function mountPlaceHistory(box, e) {
   $$("[data-hscene]", box).forEach(b => b.onclick = () => goScene(b.dataset.hscene));
 }
 
-/* ================= 6. portal finder: density of a current + distance to a centre (e.g. the silver tree) ================= */
+/* ================= 6. portal finder: density of a current + distance to a centre (e.g. a shrine or a capital) ================= */
 function placeOnMaps(id) { return entsBy("mapa").map(m => ({ m, P: tripPlaces(m.map || {}) })).filter(x => x.m.map && x.P[id]); }
 function mapKm(m, a, b) { const M = m.map; if (!(+M.km)) return null; return Math.hypot((b.x - a.x) * M.w, (b.y - a.y) * M.h) / M.w * +M.km; }
 function openPortalFinder(flowId) {
   const fl = flows(); if (!fl.length) { toast(tl("Najprv pridaj aspoň jeden magický prúd.")); return; }
   const U = Object.assign({ f: flowId || fl[0].id, min: 3, max: "", center: null, map: null }, openPortalFinder.last || {}, flowId ? { f: flowId } : {});
   if (!S.ents[U.f]) U.f = fl[0].id;
-  if (!U.center || !S.ents[U.center]) U.center = (Object.values(S.ents).find(e => /striebro.?strom|silver.?tree|strom sveta|world.?tree/.test(norm(e.name || ""))) || {}).id || null;
+  if (!U.center || !S.ents[U.center]) U.center = (Object.values(S.ents).find(e => /strom sveta|svetovy strom|world.?tree/.test(norm(e.name || ""))) || {}).id || null;
   const m = modal(`<div class="rt-h"><h3>${esc(tl("Hľadať miesto pre portál"))}</h3><button class="btn icon ghost" data-close aria-label="${esc(tl("Zavrieť"))}">×</button></div>
-    <p class="hint">${esc(tl("Portál potrebuje dosť hustý prúd a vzdialenosť od stredu (napr. od striebrostromu). Vzdialenosť sa počíta z mapy, na ktorej sú obe miesta, podľa jej mierky (šírka mapy v km)."))}</p>
+    <p class="hint">${esc(tl("Portál potrebuje dosť hustý prúd a vzdialenosť od stredu (napr. od svätyne alebo hlavného mesta). Vzdialenosť sa počíta z mapy, na ktorej sú obe miesta, podľa jej mierky (šírka mapy v km)."))}</p>
     <div class="pf-opts"><label class="field"><span>${esc(tl("Prúd"))}</span><select class="inp" id="pfF">${fl.map(f => `<option value="${f.id}"${f.id === U.f ? " selected" : ""}>${esc(f.name || tl("Bez mena"))}</option>`).join("")}</select></label>
       <label class="field"><span>${esc(tl("Hustota aspoň"))}</span><select class="inp" id="pfMin">${[1, 2, 3, 4, 5].map(i => `<option value="${i}"${i === U.min ? " selected" : ""}>${i} / 5</option>`).join("")}</select></label>
       <label class="field"><span>${esc(tl("Merať od (stred)"))}</span><select class="inp" id="pfC"><option value="">${esc(tl("– bez vzdialenosti –"))}</option>${srcOptions([])}</select></label>
