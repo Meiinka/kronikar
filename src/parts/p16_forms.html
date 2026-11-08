@@ -62,19 +62,26 @@ function suggestForms(e) {
 }
 /* all terms that identify an entity in the text */
 function entTerms(e) {
-  const t = [e.name, ...(e.forms || [])].map(x => (x || "").trim()).filter(x => x.length > 1);
+  const t = [e.name, ...(e.forms || []), ...nicksOf(e)].map(x => (x || "").trim()).filter(x => x.length > 1);
   return [...new Set(t.map(norm))];
 }
 const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/* caches: plain text of a scene (by its html) and compiled name patterns – the text is parsed once, not for every character */
+const TXTC = new Map(), REC = new Map();
+function textOf(html) { if (!html) return { raw: "", n: "" }; let c = TXTC.get(html); if (!c) { if (TXTC.size > 3000) TXTC.clear(); const raw = htmlToText(html).replace(/\n/g, " "); c = { raw, n: norm(raw) }; TXTC.set(html, c); } return c; }
 function termRegex(terms) {
   if (!terms.length) return null;
+  const key = terms.join("\u0001"), hit = REC.get(key); if (hit) { hit.lastIndex = 0; return hit; }
+  if (REC.size > 2000) REC.clear();
   const alt = terms.sort((a, b) => b.length - a.length).map(t => reEsc(t).replace(/\s+/g, "\\s+")).join("|");
-  return new RegExp("(?<![\\p{L}\\p{N}])(?:" + alt + ")(?![\\p{L}\\p{N}])", "gu");
+  const re = new RegExp("(?<![\\p{L}\\p{N}])(?:" + alt + ")(?![\\p{L}\\p{N}])", "gu"); REC.set(key, re); return re;
 }
+/* is the entity mentioned in this html at all (fast, no snippet) */
+function mentions(e, html) { if (!html || !e || !(e.name || "").trim() || e.name.trim().length < 2) return false; const re = termRegex(entTerms(e)); if (!re) return false; re.lastIndex = 0; const r = re.test(textOf(html).n); re.lastIndex = 0; return r; }
 /* returns {count, snippet} for one scene */
 function findMentions(e, html) {
   const re = termRegex(entTerms(e)); if (!re || !html) return null;
-  const raw = htmlToText(html).replace(/\n/g, " "), tx = norm(raw);
+  const { raw, n: tx } = textOf(html); re.lastIndex = 0;
   let m, count = 0, first = -1, len = 0;
   while ((m = re.exec(tx))) { if (first < 0) { first = m.index; len = m[0].length; } count++; }
   if (!count) return null;

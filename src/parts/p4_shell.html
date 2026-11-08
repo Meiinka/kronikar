@@ -30,7 +30,7 @@ function renderHome(app) {
       <div class="row-end"><button type="button" class="btn" data-cancelnew>Zrušiť</button><button class="btn primary" type="submit">Založiť projekt</button></div>
     </form>`;
   app.innerHTML = `
-  <header class="topbar"><span class="brand">${I.logo}Kronikár</span><span class="spacer"></span><select class="inp langsel" id="uiLang" aria-label="Jazyk" title="Jazyk"><option value="sk"${LANG === "sk" ? " selected" : ""}>SK</option><option value="en"${LANG === "en" ? " selected" : ""}>EN</option></select><span class="savestate" id="savestate"></span></header>
+  <header class="topbar"><span class="brand">${I.logo}Kronikár</span><span class="spacer"></span><select class="inp langsel" id="uiLang" aria-label="Jazyk" title="Jazyk"><option value="sk"${LANG === "sk" ? " selected" : ""}>SK</option><option value="en"${LANG === "en" ? " selected" : ""}>EN</option></select>${themeBtnHtml()}<button class="btn icon ghost tb-refresh" id="tbRefresh" title="Obnoviť – načítať posledné zmeny" aria-label="Obnoviť">${I.refresh}</button><span class="savestate" id="savestate"></span></header>
   <div class="home"><div class="home-in">
     <div class="home-head"><div><h1>Tvoje knihy</h1><p>Rukopis, svet a vzťahy medzi postavami, krajinami, náboženstvami a mágiou na jednom mieste. Hotovú knihu si stiahneš ako PDF.</p></div>
       <div class="home-actions"><span id="installSlot" style="display:contents"></span><button class="btn" id="btnImport">${I.ul}Obnoviť zo zálohy</button><button class="btn" id="btnSample">Ukážkový projekt</button><button class="btn primary" id="btnNew">${I.plus}Nový projekt</button></div></div>
@@ -49,6 +49,7 @@ function renderHome(app) {
   setSave(Q.err ? "err" : "ok");
   bindSyncCard();
   $("#uiLang").onchange = e => setLang(e.target.value);
+  $("#tbRefresh").onclick = ev => refreshAll(ev.currentTarget); bindThemeBtn();
   if (typeof PWA !== "undefined") PWA.slot();
   const openNew = () => { S.newForm = true; render(); setTimeout(() => $("#nf-title")?.focus(), 0); };
   ["#btnNew", "#btnNew2", "#btnNew3"].forEach(s => $(s)?.addEventListener("click", openNew));
@@ -67,7 +68,8 @@ function renderHome(app) {
   $$("[data-backup]").forEach(b => b.onclick = () => exportBackup(b.dataset.backup));
 }
 
-const MODES = [["write", "Rukopis", I.pen], ["world", "Svet", I.globe], ["graph", "Vzťahy", I.net], ["notes", "Poznámky", I.note], ["export", "Export", I.book], ["stats", "Projekt", I.gear]];
+I.clock = '<svg viewBox="0 0 16 16"><path d="M1.5 8h13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="4" cy="8" r="1.8" fill="currentColor"/><circle cx="9.5" cy="8" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4 4.5v-2M9.5 11.5v2M13 4.5v-2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const MODES = [["write", "Rukopis", I.pen], ["world", "Svet", I.globe], ["graph", "Vzťahy", I.net], ["time", "Čas", I.clock], ["notes", "Poznámky", I.note], ["export", "Export", I.book], ["stats", "Projekt", I.gear]];
 function renderProject(app) {
   app.innerHTML = `
   <header class="topbar">
@@ -76,15 +78,23 @@ function renderProject(app) {
     <nav class="tabs" aria-label="Sekcie projektu">${MODES.map(([id, n]) => `<button class="tab${S.mode === id ? " on" : ""}" data-mode="${id}">${n}</button>`).join("")}</nav>
     <span class="spacer"></span>
     <div class="goalbox" id="goalbox"></div>
+    <button class="btn icon ghost tb-refresh" id="tbSearch" title="Hľadať všade (Ctrl+K)" aria-label="Hľadať všade">${I.search}</button>
+    ${themeBtnHtml()}<button class="btn icon ghost tb-refresh" id="tbRefresh" title="Obnoviť – načítať posledné zmeny" aria-label="Obnoviť">${I.refresh}</button>
     <span class="savestate" id="savestate"></span>
   </header>
+  <div id="cfbar" class="cfbar" hidden></div>
+  <div id="needbar" class="needbar" hidden></div>
   <div id="main" style="flex:1;display:flex;min-height:0"></div>
   <nav class="mobnav">${MODES.map(([id, n, ic]) => `<button data-mode="${id}" class="${S.mode === id ? "on" : ""}">${ic}${n}</button>`).join("")}</nav>`;
   $("#goHome").onclick = goHome;
+  $("#tbRefresh").onclick = ev => refreshAll(ev.currentTarget); bindThemeBtn();
+  $("#tbSearch").addEventListener("click", () => openSearch());
   $$("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
   setSave(Q.err ? "err" : Q.pending.size ? "busy" : "ok");
   updateGoals();
   renderMode();
+  if (typeof Sync !== "undefined") Sync.renderBar();
+  if (typeof renderNeedBar === "function") renderNeedBar();
 }
 function setMode(m) {
   if (S.mode === m && m !== "write") return;
@@ -100,6 +110,7 @@ function renderMode() {
   if (S.mode === "write") renderWrite(main);
   else if (S.mode === "world") renderWorld(main);
   else if (S.mode === "graph") renderGraph(main);
+  else if (S.mode === "time") renderTimeline(main);
   else if (S.mode === "notes") renderNotes(main);
   else if (S.mode === "export") renderExport(main);
   else renderStats(main);

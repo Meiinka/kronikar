@@ -10,6 +10,9 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.DocumentsContract;
+import android.speech.RecognizerIntent;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.util.Base64;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
@@ -27,6 +30,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 
 /**
  * Kronikár: the writing app runs in a WebView from bundled assets.
@@ -38,8 +42,77 @@ public class MainActivity extends Activity {
     private static final String START = "file:///android_asset/index.html";
     private static final int REQ_TREE = 41;
     private static final int REQ_FILE = 42;
+    private static final int REQ_STT = 43;
 
     private WebView web;
+    private TextToSpeech tts;
+    private int ttsState = 0; /* 0 none, 1 starting, 2 ready, -1 failed */
+
+    private void jsTts(final String ev, final String id) {
+        web.post(new Runnable() { @Override public void run() { web.evaluateJavascript("window.__tts&&window.__tts(" + JSONObject.quote(ev) + "," + JSONObject.quote(id) + ")", null); } });
+    }
+
+    /** dictation through the system speech recogniser dialog (WebView has no SpeechRecognition) */
+    private class Stt {
+        @JavascriptInterface public boolean available() {
+            try { return new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(getPackageManager()) != null; } catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public void listen(final String lang) {
+            runOnUiThread(new Runnable() { @Override public void run() {
+                try {
+                    Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                    i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                    if (lang != null && lang.length() > 0) { i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang); i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang); }
+                    startActivityForResult(i, REQ_STT);
+                } catch (Exception e) {
+                    web.evaluateJavascript("window.__stt&&window.__stt(null)", null);
+                }
+            } });
+        }
+    }
+
+    /** reading aloud through the system text-to-speech engine (WebView has no speechSynthesis) */
+    private class Tts {
+        @JavascriptInterface public void init() {
+            runOnUiThread(new Runnable() { @Override public void run() {
+                if (tts != null) { if (ttsState != 1) jsTts(ttsState == 2 ? "ready" : "fail", ""); return; }
+                ttsState = 1;
+                tts = new TextToSpeech(MainActivity.this, new TextToSpeech.OnInitListener() {
+                    @Override public void onInit(int status) {
+                        ttsState = status == TextToSpeech.SUCCESS ? 2 : -1;
+                        if (ttsState == 2) tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                            @Override public void onStart(String id) { jsTts("start", id); }
+                            @Override public void onDone(String id) { jsTts("done", id); }
+                            @Override public void onError(String id) { jsTts("error", id); }
+                        });
+                        jsTts(ttsState == 2 ? "ready" : "fail", "");
+                    }
+                });
+            } });
+        }
+        @JavascriptInterface public int langOk(String tag) {
+            if (tts == null || ttsState != 2) return -9;
+            try { return tts.isLanguageAvailable(Locale.forLanguageTag(tag)); } catch (Exception e) { return -9; }
+        }
+        @JavascriptInterface public boolean speak(String text, String tag, float rate, String id, boolean flush) {
+            if (tts == null || ttsState != 2) return false;
+            try {
+                tts.setLanguage(Locale.forLanguageTag(tag));
+                tts.setSpeechRate(rate);
+                return tts.speak(text, flush ? TextToSpeech.QUEUE_FLUSH : TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.SUCCESS;
+            } catch (Exception e) { return false; }
+        }
+        @JavascriptInterface public void stop() { if (tts != null) try { tts.stop(); } catch (Exception ignored) { } }
+        @JavascriptInterface public void openSettings() {
+            try { Intent i = new Intent("com.android.settings.TTS_SETTINGS"); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i); } catch (Exception ignored) { }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (tts != null) { try { tts.shutdown(); } catch (Exception ignored) { } tts = null; }
+        super.onDestroy();
+    }
     private ValueCallback<Uri[]> fileCallback;
     private SharedPreferences prefs;
 
@@ -63,6 +136,8 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(true);
 
         web.addJavascriptInterface(new Bridge(), "AndroidFS");
+        web.addJavascriptInterface(new Tts(), "AndroidTTS");
+        web.addJavascriptInterface(new Stt(), "AndroidSTT");
         web.setWebViewClient(new WebViewClient() {
             @Override
             @SuppressWarnings("deprecation")
@@ -76,10 +151,14 @@ public class MainActivity extends Activity {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
                 try {
-                    Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    boolean images = false;
+                    String[] acc = params.getAcceptTypes();
+                    if (acc != null) for (String a : acc) if (a != null && a.startsWith("image")) images = true;
+                    Intent i = new Intent(images ? Intent.ACTION_GET_CONTENT : Intent.ACTION_OPEN_DOCUMENT);
                     i.addCategory(Intent.CATEGORY_OPENABLE);
-                    i.setType("*/*");
-                    startActivityForResult(i, REQ_FILE);
+                    i.setType(images ? "image/*" : "*/*");
+                    if (params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    startActivityForResult(Intent.createChooser(i, null), REQ_FILE);
                 } catch (Exception e) {
                     fileCallback = null;
                     return false;
@@ -139,9 +218,23 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_STT) {
+            String text = null;
+            if (res == RESULT_OK && data != null) {
+                java.util.ArrayList<String> r = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (r != null && !r.isEmpty()) text = r.get(0);
+            }
+            web.evaluateJavascript("window.__stt&&window.__stt(" + (text == null ? "null" : JSONObject.quote(text)) + ")", null);
+            return;
+        }
         if (req == REQ_FILE) {
             Uri[] result = null;
-            if (res == RESULT_OK && data != null && data.getData() != null) result = new Uri[]{data.getData()};
+            if (res == RESULT_OK && data != null) {
+                if (data.getClipData() != null && data.getClipData().getItemCount() > 0) {
+                    result = new Uri[data.getClipData().getItemCount()];
+                    for (int k = 0; k < result.length; k++) result[k] = data.getClipData().getItemAt(k).getUri();
+                } else if (data.getData() != null) result = new Uri[]{data.getData()};
+            }
             if (fileCallback != null) fileCallback.onReceiveValue(result);
             fileCallback = null;
             return;
@@ -226,25 +319,52 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    /** "" = the picked folder itself, otherwise one sub-folder (e.g. "zalohy"). */
+    /** "" = the picked folder itself, otherwise a path of sub-folders ("zalohy", "Kniha/rukopis"). */
     private String dirId(String sub, boolean create) throws Exception {
-        String root = rootId();
-        if (sub == null || sub.isEmpty()) return root;
-        JSONObject o = find(root, sub);
-        if (o != null) return o.getString("id");
-        if (!create) return null;
-        Uri u = DocumentsContract.createDocument(getContentResolver(), docUri(root), DocumentsContract.Document.MIME_TYPE_DIR, sub);
-        return u == null ? null : DocumentsContract.getDocumentId(u);
+        String id = rootId();
+        if (sub == null || sub.isEmpty()) return id;
+        for (String part : sub.split("/")) {
+            if (part.isEmpty()) continue;
+            JSONObject o = find(id, part);
+            if (o != null) { id = o.getString("id"); continue; }
+            if (!create) return null;
+            Uri u = DocumentsContract.createDocument(getContentResolver(), docUri(id), DocumentsContract.Document.MIME_TYPE_DIR, part);
+            if (u == null) return null;
+            id = DocumentsContract.getDocumentId(u);
+        }
+        return id;
     }
 
     private static String mimeFor(String name) {
         String n = name.toLowerCase();
         if (n.endsWith(".json")) return "application/json";
+        if (n.endsWith(".html")) return "text/html";
         if (n.endsWith(".pdf")) return "application/pdf";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (n.endsWith(".epub")) return "application/epub+zip";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".svg")) return "image/svg+xml";
         if (n.endsWith(".md")) return "text/markdown";
         if (n.endsWith(".txt")) return "text/plain";
         return "application/octet-stream";
+    }
+
+    private byte[] readBytes(String sub, String name) {
+        try {
+            String id = dirId(sub, false);
+            if (id == null) return null;
+            JSONObject o = find(id, name);
+            if (o == null) return null;
+            InputStream is = getContentResolver().openInputStream(docUri(o.getString("id")));
+            if (is == null) return null;
+            try {
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                byte[] buf = new byte[65536]; int n;
+                while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
+                return bo.toByteArray();
+            } finally { is.close(); }
+        } catch (Exception e) { Log.e(TAG, "read " + name, e); return null; }
     }
 
     private boolean writeBytes(String sub, String name, byte[] bytes) {
@@ -312,20 +432,13 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface public String read(String sub, String name) {
-            try {
-                String id = dirId(sub, false);
-                if (id == null) return null;
-                JSONObject o = find(id, name);
-                if (o == null) return null;
-                InputStream is = getContentResolver().openInputStream(docUri(o.getString("id")));
-                if (is == null) return null;
-                try {
-                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                    byte[] buf = new byte[65536]; int n;
-                    while ((n = is.read(buf)) > 0) bo.write(buf, 0, n);
-                    return new String(bo.toByteArray(), StandardCharsets.UTF_8);
-                } finally { is.close(); }
-            } catch (Exception e) { Log.e(TAG, "read " + name, e); return null; }
+            byte[] b = readBytes(sub, name);
+            return b == null ? null : new String(b, StandardCharsets.UTF_8);
+        }
+
+        @JavascriptInterface public String readBase64(String sub, String name) {
+            byte[] b = readBytes(sub, name);
+            return b == null ? null : Base64.encodeToString(b, Base64.NO_WRAP);
         }
 
         @JavascriptInterface public boolean write(String sub, String name, String text) {

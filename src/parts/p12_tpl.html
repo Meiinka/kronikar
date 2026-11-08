@@ -186,7 +186,12 @@ function pdfBreak(c) {
 }
 function folioAlign(f, pg) { return f === "outer" ? (pg % 2 ? "right" : "left") : f === "right" ? "right" : "center"; }
 
-/* mode: full | text | toc */
+/* beta-reader edition: shared texts */
+function betaInfo() {
+  const en = bookLang() === "en";
+  return { label: tlb("Verzia pre beta čitateľov"), mark: tlb("Pracovná verzia – prosím, nešír ďalej"), note: tlb("Odseky sú očíslované (kapitola.odsek). Pri pripomienkach uveď číslo, napríklad 3.12."), date: new Date().toLocaleDateString(en ? "en-GB" : "sk-SK", { day: "numeric", month: "long", year: "numeric" }) };
+}
+/* mode: full | text | toc | beta */
 async function buildPdf(mode = "full") {
   const p = S.p, e = p.exp, t = tplOf(e), T = tpdfOf(e.tpl), o = resolveOpts(e, t), fs = +e.fs || 10, g = pageGeo(e), ms = t.g === "ms";
   await loadPdfMake();
@@ -198,9 +203,19 @@ async function buildPdf(mode = "full") {
   if (!struct.length) throw new Error("Rukopis je prázdny alebo nie je nič zahrnuté do exportu.");
   const c = { p: { ...p, title: p.title || tlb("Bez názvu") }, e, t, o, fs, H: g.H, W: g.W, M: g.M, cw: g.cw, ht: g.H * o.headTop, headKey, gray: "#6E6E6E", ink: "#1E1E1E", accent: t.accent, toc: !!e.toc && !ms };
   const fix = n => { if (n && typeof n === "object") { if (n.font && !pdfMake.fonts[n.font]) n.font = headKey; Object.values(n).forEach(v => { if (Array.isArray(v)) v.forEach(fix); else if (v && typeof v === "object") fix(v); }); } return n; };
-  const withFront = mode === "full";
+  const withFront = mode === "full", beta = mode === "beta", bi = beta ? betaInfo() : null;
+  const ax = withFront || beta ? await appendixData() : { front: [], back: [] }, axH = g.H - g.M[1] - g.M[3] - c.ht - fs * 5;
   const makeContent = blanks => {
     const content = [];
+    if (beta) content.push({ stack: [
+      { text: c.p.title, fontSize: fs * 2.2, bold: true, alignment: "center", margin: [0, g.H * .2, 0, fs * .6] },
+      p.subtitle ? { text: p.subtitle, italics: true, alignment: "center", margin: [0, 0, 0, fs * .6] } : null,
+      p.author ? { text: p.author, alignment: "center", margin: [0, fs, 0, 0] } : null,
+      { text: bi.label.toUpperCase(), fontSize: fs * .85, characterSpacing: 1.5, bold: true, color: c.gray, alignment: "center", margin: [0, g.H * .12, 0, fs * .3] },
+      { text: bi.date, alignment: "center", color: c.gray, margin: [0, 0, 0, fs * 2] },
+      { text: bi.note, alignment: "center", fontSize: fs * .9, margin: [fs * 2, 0, fs * 2, fs * .6] },
+      { text: bi.mark, alignment: "center", fontSize: fs * .9, italics: true, color: c.gray, margin: [fs * 2, 0, fs * 2, 0] },
+    ].filter(Boolean) });
     if (withFront) {
       content.push({ stack: T.title(c).filter(Boolean) });
       if (!ms) {
@@ -210,22 +225,26 @@ async function buildPdf(mode = "full") {
         if (c.toc) content.push({ toc: { title: { text: tlb(e.tpl === "kronika" ? "OBSAH" : "Obsah"), font: headWant ? headKey : undefined, fontSize: fs * 1.5, bold: e.tpl === "klasicka", italics: e.tpl === "elegantna", alignment: e.tpl === "moderna" ? "left" : "center", margin: [0, g.H * .08, 0, fs * 2] }, textStyle: { fontSize: fs }, numberStyle: { fontSize: fs } }, pageBreak: "before" });
       }
     }
-    const hopts = { indent: fs * o.indent, indentFirst: o.indentFirst, gap: o.gap, brk: () => pdfBreak(c) };
-    let firstBlock = !withFront;
+    if (ax.front.length) content.push(...appendixPdf(ax.front, c, axH));
+    let cn = 0, pn = 0;
+    const hopts = { indent: fs * o.indent, indentFirst: o.indentFirst, gap: o.gap, brk: () => pdfBreak(c), num: beta ? () => cn + "." + (++pn) : null };
+    let firstBlock = !withFront && !beta;
     struct.forEach(s => {
-      const id = (s.type === "part" ? "pt" : "ch") + s.n;
+      const id = s.loose ? s.lid : (s.type === "part" ? "pt" : "ch") + s.n;
       if (blanks.has(id)) content.push({ text: " ", pageBreak: "before" });
       const pb = firstBlock && !blanks.has(id) ? undefined : "before"; firstBlock = false;
       if (s.type === "part") { content.push({ stack: styleHead(T.part(s, c), c), pageBreak: pb }); return; }
-      content.push({ stack: styleHead(T.chapter(s, c), c), pageBreak: pb });
+      if (s.loose) content.push({ text: "", pageBreak: pb, margin: [0, c.ht, 0, 0] }); else content.push({ stack: styleHead(T.chapter(s, c), c), pageBreak: pb });
+      cn = s.loose ? roman(s.part) : s.n; pn = 0;
       s.texts.forEach((tx, i) => {
         if (i > 0) content.push(pdfBreak(c));
         const nodes = htmlToPdf(exportHtml(S.items[tx.id]?.html), fs, hopts);
-        if (i === 0 && o.opener) applyOpener(nodes.find(n => "leadingIndent" in n), o.opener, c);
+        if (i === 0 && o.opener && !beta && !s.loose) applyOpener(nodes.find(n => "leadingIndent" in n), o.opener, c);
         content.push(...nodes);
       });
     });
-    if (o.endMark) content.push({ text: o.endMark, alignment: "center", margin: [0, fs * 2.5, 0, 0] });
+    if (o.endMark && !beta) content.push({ text: o.endMark, alignment: "center", margin: [0, fs * 2.5, 0, 0] });
+    if (ax.back.length) content.push(...appendixPdf(ax.back, c, axH));
     return fix(content);
   };
   const makeDD = (starts, blanks, record) => {
@@ -240,13 +259,16 @@ async function buildPdf(mode = "full") {
       content: makeContent(blanks),
       header: pg => {
         if (record) return null; const i = info(pg);
+        if (beta) return pg === 1 ? null : { text: c.p.title + "  ·  " + bi.mark, fontSize: fs * .7, color: c.gray, alignment: "center", margin: [g.M[0], Math.max(10, g.M[1] * .5 - fs * .4), g.M[2], 0] };
         if (i.blank) return null;
         if (ms) { if (!e.runhead || (withFront && pg === 1)) return null; }
         else if (!e.runhead || i.front || i.opening) return null;
         const n = fix(T.header(pg, i, c)); n.margin = [g.M[0], Math.max(10, g.M[1] * .5 - fs * .4), g.M[2], 0]; return n;
       },
       footer: pg => {
-        if (record || o.folio === "none") return null; const i = info(pg);
+        if (record) return null;
+        if (beta) return pg === 1 ? null : { text: String(pg), fontSize: fs * .8, color: c.gray, alignment: "center", margin: [g.M[0], Math.max(8, g.M[3] * .5 - fs * .4), g.M[2], 0] };
+        if (o.folio === "none") return null; const i = info(pg);
         if (i.blank || i.part || (withFront && (ms ? pg === 1 : i.front))) return null;
         const n = T.footer(pg, i, c); if (!n) return null; fix(n); n.alignment = folioAlign(o.folio, pg);
         n.margin = [g.M[0], Math.max(8, g.M[3] * .5 - fs * .4), g.M[2], 0]; return n;
@@ -257,7 +279,7 @@ async function buildPdf(mode = "full") {
   };
   const layout = async (blanks) => { const starts = {}; await new Promise((res, rej) => { try { pdfMake.createPdf(makeDD(starts, blanks, true)).getBuffer(() => res()); } catch (err) { rej(err); } }); return starts; };
   let blanks = new Set(), starts = await layout(blanks);
-  if (o.recto && mode !== "toc") {
+  if (o.recto && (mode === "full" || mode === "text")) {
     for (let pass = 0; pass < 8; pass++) {
       let changed = false; const nb = new Set(blanks);
       Object.entries(starts).sort((a, b) => a[1] - b[1]).forEach(([id, pg]) => { if (pg % 2 === 0) { nb.has(id) ? nb.delete(id) : nb.add(id); changed = true; } });
@@ -269,7 +291,7 @@ async function buildPdf(mode = "full") {
   return new Promise((res, rej) => { try { pdfMake.createPdf(makeDD(starts, blanks, false)).getBlob(b => res(b)); } catch (err) { rej(err); } });
 }
 function buildTocPdf(struct, starts, c, bodyKey, headKey) {
-  const fs = c.fs, rows = struct.map(s => {
+  const fs = c.fs, rows = struct.filter(s => !s.loose).map(s => {
     const id = (s.type === "part" ? "pt" : "ch") + s.n, part = s.type === "part", lab = part ? partName(s.n, c.t.lang) : chapNum(s.n, c.e, null, c.t.lang);
     return [{ text: [lab ? { text: lab + (part ? ": " : " · "), color: c.gray } : "", s.title], bold: part, margin: [part ? 0 : fs, part ? fs * .5 : 0, 0, 0] }, { text: String(starts[id] || ""), alignment: "right", margin: [0, part ? fs * .5 : 0, 0, 0] }];
   });
@@ -332,7 +354,7 @@ function zipStore(files) {
   [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, cdSize, 4], [16, off, 4], [20, 0, 2]].forEach(([o, v, s]) => s === 4 ? end.setUint32(o, v, true) : end.setUint16(o, v, true));
   return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 }
-const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
 const xr = (text, f = {}) => `<w:r><w:rPr>${f.b ? "<w:b/>" : ""}${f.i ? "<w:i/>" : ""}${f.caps ? "<w:caps/>" : ""}${f.sz ? `<w:sz w:val="${Math.round(f.sz * 2)}"/><w:szCs w:val="${Math.round(f.sz * 2)}"/>` : ""}${f.color ? `<w:color w:val="${f.color}"/>` : ""}</w:rPr><w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
 const xp = (runs, pr = {}) => `<w:p><w:pPr>${pr.style ? `<w:pStyle w:val="${pr.style}"/>` : ""}${pr.keep ? "<w:keepNext/>" : ""}${pr.pb ? "<w:pageBreakBefore/>" : ""}${pr.before !== undefined || pr.after !== undefined ? `<w:spacing${pr.before !== undefined ? ` w:before="${Math.round(pr.before)}"` : ""}${pr.after !== undefined ? ` w:after="${Math.round(pr.after)}"` : ""}/>` : ""}${pr.ind !== undefined ? `<w:ind w:firstLine="${Math.round(pr.ind)}"/>` : ""}${pr.jc ? `<w:jc w:val="${pr.jc}"/>` : ""}</w:pPr>${runs}</w:p>`;
 function htmlToDocx(html, o) {
@@ -347,7 +369,7 @@ function htmlToDocx(html, o) {
   [...d.body.firstChild.childNodes].forEach(el => {
     const txt = el.textContent.trim(); if (!txt) return;
     if (el.nodeType === 1 && (el.classList.contains("sb") || /^([*#~·•⁂]\s*){1,5}$/.test(txt))) { out.push(o.brk()); first = true; return; }
-    const r = el.nodeType === 3 ? xr(txt) : runs(el);
+    const r = (o.num ? xr(o.num() + "\u2002", { sz: (o.fs || 12) * .72, color: "8A8A8A" }) : "") + (el.nodeType === 3 ? xr(txt) : runs(el));
     if (el.tagName === "BLOCKQUOTE") { out.push(xp(r, { style: "Quote" })); first = true; return; }
     if ((el.getAttribute?.("style") || "").includes("center")) { out.push(xp(r, { jc: "center", ind: 0 })); first = true; return; }
     out.push(xp(r, { style: first && !o.indentFirst ? "BodyFirst" : "Body" })); first = false;
@@ -355,7 +377,7 @@ function htmlToDocx(html, o) {
   return out;
 }
 function docxPackage(bodyXml, opt) {
-  const { geo, fontName, fs, lh, ind, gap, jc, lang, header, footer, titlePg } = opt, tw = v => Math.round(v * 20);
+  const { geo, fontName, fs, lh, ind, gap, jc, lang, header, footer, titlePg } = opt, tw = v => Math.round(v * 20), media = opt.media || [];
   const sect = `<w:sectPr>${header ? '<w:headerReference w:type="default" r:id="rIdH"/>' : ""}${footer ? '<w:footerReference w:type="default" r:id="rIdF"/>' : ""}<w:pgSz w:w="${tw(geo.W)}" w:h="${tw(geo.H)}"/><w:pgMar w:top="${tw(geo.M[1])}" w:right="${tw(geo.M[2])}" w:bottom="${tw(geo.M[3])}" w:left="${tw(geo.M[0])}" w:header="${tw(Math.max(20, geo.M[1] * .45))}" w:footer="${tw(Math.max(20, geo.M[3] * .45))}" w:gutter="0"/>${titlePg ? "<w:titlePg/>" : ""}</w:sectPr>`;
   const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W_NS}><w:body>${bodyXml}${sect}</w:body></w:document>`;
   const rpr = `<w:rFonts w:ascii="${fontName}" w:hAnsi="${fontName}" w:cs="${fontName}" w:eastAsia="${fontName}"/><w:sz w:val="${Math.round(fs * 2)}"/><w:szCs w:val="${Math.round(fs * 2)}"/><w:lang w:val="${lang === "en" ? "en-GB" : "sk-SK"}"/>`;
@@ -368,12 +390,12 @@ function docxPackage(bodyXml, opt) {
 <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="120" w:after="120"/><w:ind w:left="${tw(fs * 2)}" w:right="${tw(fs * 2)}"/></w:pPr><w:rPr><w:i/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr></w:style>
 <w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:line="240" w:lineRule="auto"/></w:pPr></w:style></w:styles>`;
-  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${header ? '<Relationship Id="rIdH" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>' : ""}${footer ? '<Relationship Id="rIdF" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' : ""}</Relationships>`;
-  const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${header ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>' : ""}${footer ? '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' : ""}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdS" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${header ? '<Relationship Id="rIdH" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>' : ""}${footer ? '<Relationship Id="rIdF" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' : ""}${media.map(m => `<Relationship Id="${m.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${m.name}"/>`).join("")}</Relationships>`;
+  const ct = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${media.some(m => m.ext === "png") ? '<Default Extension="png" ContentType="image/png"/>' : ""}${media.some(m => m.ext === "jpg") ? '<Default Extension="jpg" ContentType="image/jpeg"/>' : ""}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${header ? '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>' : ""}${footer ? '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' : ""}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
   const p = S.p;
   const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${esc(p.title)}</dc:title><dc:creator>${esc(p.author || "")}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0, 19)}Z</dcterms:created></cp:coreProperties>`;
   const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
-  const files = [{ name: "[Content_Types].xml", data: ct }, { name: "_rels/.rels", data: rootRels }, { name: "docProps/core.xml", data: core }, { name: "word/document.xml", data: doc }, { name: "word/styles.xml", data: styles }, { name: "word/_rels/document.xml.rels", data: rels }];
+  const files = [{ name: "[Content_Types].xml", data: ct }, { name: "_rels/.rels", data: rootRels }, { name: "docProps/core.xml", data: core }, { name: "word/document.xml", data: doc }, { name: "word/styles.xml", data: styles }, { name: "word/_rels/document.xml.rels", data: rels }, ...media.map(m => ({ name: "word/media/" + m.name, data: m.data }))];
   if (header) files.push({ name: "word/header1.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr ${W_NS}>${header}</w:hdr>` });
   if (footer) files.push({ name: "word/footer1.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${W_NS}>${footer}</w:ftr>` });
   return zipStore(files);
@@ -392,7 +414,7 @@ async function buildDocx(mode = "full") {
     } else {
       body.push(xp(xr(lang === "en" ? "Contents" : "Obsah", { b: true, sz: 18 }), { jc: "center", after: 120 }));
       body.push(xp(xr(p.title + (p.author ? " · " + p.author : ""), { i: true }), { jc: "center", after: 360 }));
-      bookStructure().forEach(s => body.push(s.type === "part" ? xp(xr(partName(s.n, lang) + ": " + s.title, { b: true }), { before: 200, after: 60 }) : xp((chapNum(s.n, e, null, lang) ? xr(chapNum(s.n, e, null, lang) + " · ", { color: "666666" }) : "") + xr(s.title), { after: 40 })));
+      bookStructure().filter(s => !s.loose).forEach(s => body.push(s.type === "part" ? xp(xr(partName(s.n, lang) + ": " + s.title, { b: true }), { before: 200, after: 60 }) : xp((chapNum(s.n, e, null, lang) ? xr(chapNum(s.n, e, null, lang) + " · ", { color: "666666" }) : "") + xr(s.title), { after: 40 })));
     }
     return docxPackage(body.join(""), { geo: { W: 595.28, H: 841.89, M: [72, 72, 72, 72] }, fontName, fs: 11.5, lh: 1.3, ind: 0, gap: 0, jc: "left", lang, header: "", footer: `<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>${PAGE_FIELD}</w:p>`, titlePg: false });
   }
@@ -417,20 +439,162 @@ async function buildDocx(mode = "full") {
       if (ms) body.push(xp(lines([p.genre, wordsRounded("en").replace(/^about/, "Approx."), contact].filter(Boolean).join("\n")), { before: tw(g.H * .22) }));
     }
   }
-  let firstBlock = mode !== "full";
+  const beta = mode === "beta", bi = beta ? betaInfo() : null; let cn = 0, pn = 0;
+  if (beta) {
+    body.push(xp(xr(p.title || tlb("Bez názvu"), { b: true, sz: fs * 2 }), { jc: "center", before: tw(g.H * .2), after: 120 }));
+    if (p.subtitle) body.push(xp(xr(p.subtitle, { i: true }), { jc: "center" }));
+    if (p.author) body.push(xp(xr(p.author), { jc: "center", before: 200 }));
+    body.push(xp(xr(bi.label.toUpperCase(), { b: true, sz: fs * .85, color: "6E6E6E" }), { jc: "center", before: tw(g.H * .1), after: 60 }));
+    body.push(xp(xr(bi.date, { color: "6E6E6E" }), { jc: "center", after: 480 }));
+    body.push(xp(xr(bi.note, { sz: fs * .9 }), { jc: "center", after: 120 }));
+    body.push(xp(xr(bi.mark, { i: true, sz: fs * .9, color: "6E6E6E" }), { jc: "center" }));
+  }
+  const ax = mode === "full" || beta ? await appendixData() : { front: [], back: [] }, media = [], axW = g.W - g.M[0] - g.M[2], axH = H - fs * 6;
+  if (ax.front.length) body.push(...appendixDocx(ax.front, fs, axW, axH, media));
+  let firstBlock = mode !== "full" && !beta && !ax.front.length;
   bookStructure().forEach(s => {
     const pb = !firstBlock; firstBlock = false;
     if (s.type === "part") { body.push(xp(xr(partName(s.n, lang)), { jc: "center", pb, before: tw(H * .3), keep: true })); body.push(xp(xr(s.title, { b: true, sz: fs * 1.4 }), { style: "Heading1" })); return; }
-    const lab = chapNum(s.n, e, null, lang);
-    body.push(xp(xr(lab || " "), { jc: "center", pb, before: tw(H * o.headTop), keep: true, after: 120 }));
-    body.push(xp(xr(s.title, { b: !ms || t.tp === "sk", sz: ms ? fs : fs * 1.5 }), { style: "Heading1" }));
-    s.texts.forEach((tx, i) => { if (i > 0) body.push(brk()); body.push(...htmlToDocx(exportHtml(S.items[tx.id]?.html), { indentFirst: o.indentFirst, brk })); });
+    if (s.loose) body.push(xp("", { pb, before: tw(H * o.headTop) }));
+    else {
+      const lab = chapNum(s.n, e, null, lang);
+      body.push(xp(xr(lab || " "), { jc: "center", pb, before: tw(H * o.headTop), keep: true, after: 120 }));
+      body.push(xp(xr(s.title, { b: !ms || t.tp === "sk", sz: ms ? fs : fs * 1.5 }), { style: "Heading1" }));
+    }
+    cn = s.loose ? roman(s.part) : s.n; pn = 0;
+    s.texts.forEach((tx, i) => { if (i > 0) body.push(brk()); body.push(...htmlToDocx(exportHtml(S.items[tx.id]?.html), { indentFirst: o.indentFirst, brk, fs, num: beta ? () => cn + "." + (++pn) : null })); });
   });
-  if (o.endMark) body.push(xp(xr(o.endMark), { jc: "center", before: 480 }));
+  if (o.endMark && !beta) body.push(xp(xr(o.endMark), { jc: "center", before: 480 }));
+  if (ax.back.length) body.push(...appendixDocx(ax.back, fs, axW, axH, media));
   const hdrText = ms ? msHeaderText(t, p, "") : p.title;
-  const header = e.runhead ? `<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="${ms ? "right" : "center"}"/></w:pPr>${xr(hdrText, ms ? {} : { i: true })}${ms && t.hdr === "sur/TITLE/pg" ? PAGE_FIELD : ""}</w:p>` : "";
-  const footer = o.folio !== "none" ? `<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="${o.folio === "outer" || o.folio === "right" ? "right" : "center"}"/></w:pPr>${PAGE_FIELD}</w:p>` : "";
-  return docxPackage(body.join(""), { geo: g, fontName, fs, lh: +e.lh || 1.5, ind: fs * o.indent, gap: o.gap, jc: e.align === "left" ? "left" : "both", lang, header, footer, titlePg: mode === "full" });
+  const header = beta ? `<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="center"/></w:pPr>${xr(p.title + "  ·  " + bi.mark, { sz: fs * .7, color: "6E6E6E" })}</w:p>` : e.runhead ? `<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="${ms ? "right" : "center"}"/></w:pPr>${xr(hdrText, ms ? {} : { i: true })}${ms && t.hdr === "sur/TITLE/pg" ? PAGE_FIELD : ""}</w:p>` : "";
+  const footer = beta || o.folio !== "none" ? `<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="${o.folio === "outer" || o.folio === "right" ? "right" : "center"}"/></w:pPr>${PAGE_FIELD}</w:p>` : "";
+  return docxPackage(body.join(""), { geo: g, fontName, fs, lh: +e.lh || 1.5, ind: fs * o.indent, gap: o.gap, jc: e.align === "left" ? "left" : "both", lang, header, footer, titlePg: mode === "full" || beta, media });
+}
+
+/* ---------- EPUB 3 (with EPUB 2 toc.ncx for older readers) ---------- */
+function htmlToXhtml(html, o) {
+  const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html"), out = []; let first = true;
+  const inl = node => [...node.childNodes].map(ch => {
+    if (ch.nodeType === 3) return esc(ch.textContent.replace(/\s+/g, " "));
+    if (ch.nodeType !== 1) return "";
+    const tg = ch.tagName, inner = inl(ch);
+    if (tg === "BR") return "<br/>";
+    if (tg === "B" || tg === "STRONG") return "<b>" + inner + "</b>";
+    if (tg === "I" || tg === "EM") return "<i>" + inner + "</i>";
+    if (tg === "U") return "<u>" + inner + "</u>";
+    if (tg === "S" || tg === "STRIKE" || tg === "DEL") return "<s>" + inner + "</s>";
+    if (tg === "SUP" || tg === "SUB") return "<" + tg.toLowerCase() + ">" + inner + "</" + tg.toLowerCase() + ">";
+    return inner;
+  }).join("");
+  [...d.body.firstChild.childNodes].forEach(el => {
+    const txt = el.textContent.trim(); if (!txt) return;
+    if (el.nodeType === 1 && (el.classList.contains("sb") || /^([*#~·•⁂]\s*){1,5}$/.test(txt))) { out.push(o.brk()); first = true; return; }
+    let body = el.nodeType === 3 ? esc(txt) : inl(el).replace(/^\s+/, "");
+    if (o.num) body = '<span class="num">' + o.num() + "</span> " + body;
+    if (el.tagName === "BLOCKQUOTE") { out.push('<blockquote><p class="first">' + body + "</p></blockquote>"); first = true; return; }
+    if (/^H[1-6]$/.test(el.tagName || "")) { out.push('<p class="sub">' + body + "</p>"); first = true; return; }
+    if ((el.getAttribute?.("style") || "").includes("center")) { out.push('<p class="center">' + body + "</p>"); first = true; return; }
+    out.push((first && !o.indentFirst ? '<p class="first">' : "<p>") + body + "</p>"); first = false;
+  });
+  return out.join("\n");
+}
+async function buildEpub(mode = "full") {
+  const p = S.p, e = p.exp, t = tplOf(e), o = resolveOpts(e, t), lang = bookLang() === "en" ? "en" : "sk", title = p.title || tlb("Bez názvu");
+  const struct = bookStructure();
+  if (!struct.length) throw new Error("Rukopis je prázdny alebo nie je nič zahrnuté do exportu.");
+  const beta = mode === "beta", full = mode === "full", bi = beta ? betaInfo() : null;
+  const sbv = sbText(e, t), brk = () => '<p class="sb">' + esc(sbv === "orn" ? "◆ ◆ ◆" : sbv === "dia" ? "◆" : (sbv || "* * *")) + "</p>";
+  const page = (ttl, body, cls) => `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${lang}" lang="${lang}"><head><meta charset="UTF-8"/><title>${esc(ttl)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body${cls ? ` class="${cls}"` : ""}>\n${body}\n</body></html>`;
+  const css = `body{margin:0 5%;font-family:serif;line-height:1.45}
+p{margin:0;text-indent:${(+o.indent || 1.4).toFixed(2)}em;text-align:${e.align === "left" ? "left" : "justify"}${o.gap ? ";margin-bottom:.6em" : ""}}
+p.first,p.center,p.sb,p.sub{text-indent:0}
+p.center{text-align:center}
+p.sb{text-align:center;margin:1.2em 0}
+p.sub{font-weight:bold;margin:1em 0 .4em}
+blockquote{margin:.6em 2em;font-style:italic}
+h1{font-size:1.5em;font-weight:normal;text-align:center;margin:3em 0 2em;page-break-before:always}
+h1 .lab{display:block;font-size:.6em;letter-spacing:.12em;text-transform:uppercase;margin-bottom:.6em}
+.part h1{margin-top:35%}
+.tp{text-align:center}
+.tp h1{font-size:2em;margin:25% 0 .4em}
+.tp p{text-indent:0;text-align:center}
+.tp .sub{font-style:italic;font-weight:normal}
+.tp .au{margin-top:1.5em;font-size:1.15em}
+.tp .meta{margin-top:3em;font-size:.85em;letter-spacing:.1em;text-transform:uppercase;color:#666}
+.tp .note{margin-top:1.5em;font-size:.9em}
+.copy p{text-indent:0;text-align:left;font-size:.85em;margin-top:60%}
+.ded p{text-indent:0;text-align:center;font-style:italic;margin-top:30%}
+.num{font-size:.72em;color:#888;font-style:normal;font-weight:normal;text-indent:0}
+nav ol{list-style:none;padding-left:1em}
+nav li{margin:.3em 0}
+.img{text-align:center;margin:1em 0}
+.img img{max-width:100%;max-height:90vh}
+dl.gl{margin:0}
+dl.gl dt{font-weight:bold;margin-top:.8em}
+dl.gl dt .pr{font-weight:normal;font-style:italic;color:#666}
+dl.gl dd{margin:.15em 0 0 1.2em}`;
+  const files = [], spine = [], toc = [];
+  const add = (name, ttl, body, cls, opts = {}) => { files.push({ id: name.replace(/\W/g, "_"), name, data: page(ttl, body, cls) }); spine.push({ id: name.replace(/\W/g, "_"), linear: opts.linear !== false }); };
+  /* title page */
+  let tp = `<h1>${esc(title)}</h1>` + (p.subtitle ? `<p class="sub">${esc(p.subtitle)}</p>` : "") + (p.author ? `<p class="au">${esc(p.author)}</p>` : "");
+  if (beta) tp += `<p class="meta">${esc(bi.label)}</p><p>${esc(bi.date)}</p><p class="note">${esc(bi.note)}</p><p class="note"><i>${esc(bi.mark)}</i></p>`;
+  add("title.xhtml", title, `<section class="tp" epub:type="titlepage">${tp}</section>`);
+  if (full) {
+    const copy = (e.copyright || "").trim() || (p.author ? "© " + new Date().getFullYear() + " " + p.author + "\n" + tlb("Všetky práva vyhradené.") : "");
+    if (copy) add("copy.xhtml", tlb("Tiráž"), `<section class="copy" epub:type="copyright-page"><p>${esc(copy).replace(/\n/g, "<br/>")}</p></section>`);
+    if ((e.dedication || "").trim()) add("ded.xhtml", tlb("Venovanie"), `<section class="ded" epub:type="dedication"><p>${esc(e.dedication.trim()).replace(/\n/g, "<br/>")}</p></section>`);
+  }
+  const navIdx = spine.length, media = [];
+  const ax = full || beta ? await appendixData() : { front: [], back: [] };
+  appendixEpub(ax.front, add, media, toc, "pril");
+  let curPart = null;
+  struct.forEach(s => {
+    if (s.type === "part") {
+      const lab = partName(s.n, lang), name = "part" + s.n + ".xhtml";
+      add(name, s.title, `<section class="part" epub:type="part"><h1><span class="lab">${esc(lab)}</span>${esc(s.title)}</h1></section>`, "part");
+      curPart = { label: lab + ": " + s.title, href: name, kids: [], node: s.node }; toc.push(curPart); return;
+    }
+    const lab = s.loose ? "" : chapNum(s.n, e, null, lang), name = (s.loose ? s.lid : "ch" + s.n) + ".xhtml"; let pn = 0;
+    const num = beta ? () => (s.loose ? roman(s.part) : s.n) + "." + (++pn) : null;
+    const body = s.texts.map(tx => htmlToXhtml(exportHtml(S.items[tx.id]?.html), { indentFirst: o.indentFirst, brk, num })).join("\n" + brk() + "\n");
+    if (s.loose) { add(name, curPart ? curPart.label : title, `<section epub:type="bodymatter">\n${body}</section>`); return; }
+    add(name, s.title, `<section epub:type="chapter"><h1>${lab ? `<span class="lab">${esc(lab)}</span>` : ""}${esc(s.title)}</h1>\n${body}</section>`);
+    const entry = { label: (lab ? lab + ": " : "") + s.title, href: name, kids: [] };
+    const under = (n, x) => n === x || (n.children || []).some(k => under(k, x));
+    (curPart && s.node && under(curPart.node, s.node) ? curPart.kids : toc).push(entry);
+  });
+  if (o.endMark && !beta) { const last = files[files.length - 1]; last.data = last.data.replace("</section>\n</body>", `<p class="sb">${esc(o.endMark)}</p></section>\n</body>`); }
+  appendixEpub(ax.back, add, media, toc, "dod");
+  /* navigation */
+  const navList = list => "<ol>" + list.map(x => `<li><a href="${x.href}">${esc(x.label)}</a>${x.kids.length ? navList(x.kids) : ""}</li>`).join("") + "</ol>";
+  const tocTitle = lang === "en" ? "Contents" : "Obsah";
+  files.push({ id: "nav", name: "nav.xhtml", props: "nav", data: page(tocTitle, `<nav epub:type="toc" id="toc"><h1>${esc(tocTitle)}</h1>${navList(toc)}</nav>`) });
+  if (full && e.toc) spine.splice(navIdx, 0, { id: "nav", linear: true }); /* otherwise the reader's own contents menu uses it */
+  let po = 0; const ncxPts = list => list.map(x => `<navPoint id="np${++po}" playOrder="${po}"><navLabel><text>${esc(x.label)}</text></navLabel><content src="${x.href}"/>${ncxPts(x.kids)}</navPoint>`).join("");
+  const uid = "urn:kronikar:" + p.id + (beta ? ":beta" : ""), now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+  const ncx = `<?xml version="1.0" encoding="UTF-8"?>\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="${esc(uid)}"/><meta name="dtb:depth" content="2"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>${esc(title)}</text></docTitle><navMap>${ncxPts(toc)}</navMap></ncx>`;
+  const opf = `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid" xml:lang="${lang}">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="uid">${esc(uid)}</dc:identifier>
+<dc:title>${esc(title + (beta ? " (" + bi.label + ")" : ""))}</dc:title>
+<dc:language>${lang}</dc:language>${p.author ? `\n<dc:creator>${esc(p.author)}</dc:creator>` : ""}${p.genre ? `\n<dc:subject>${esc(p.genre)}</dc:subject>` : ""}${(p.desc?.blurb || "").trim() && !beta ? `\n<dc:description>${esc(p.desc.blurb.trim())}</dc:description>` : ""}
+<meta property="dcterms:modified">${now}</meta>
+<meta name="generator" content="Kronikár"/>
+</metadata>
+<manifest>
+<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+<item id="css" href="style.css" media-type="text/css"/>
+${files.map(f => `<item id="${f.id}" href="${f.name}" media-type="application/xhtml+xml"${f.props ? ` properties="${f.props}"` : ""}/>`).join("\n")}${media.map(m => `\n<item id="${m.id}" href="${m.name}" media-type="${m.type}"/>`).join("")}
+</manifest>
+<spine toc="ncx">
+${spine.map(x => `<itemref idref="${x.id}"${x.linear ? "" : ' linear="no"'}/>`).join("\n")}
+</spine>
+</package>`;
+  const container = `<?xml version="1.0" encoding="UTF-8"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`;
+  const zip = zipStore([{ name: "mimetype", data: "application/epub+zip" }, { name: "META-INF/container.xml", data: container }, { name: "OEBPS/content.opf", data: opf }, { name: "OEBPS/toc.ncx", data: ncx }, { name: "OEBPS/style.css", data: css }, ...files.map(f => ({ name: "OEBPS/" + f.name, data: f.data })), ...media.map(m => ({ name: "OEBPS/" + m.name, data: m.data }))]);
+  return new Blob([zip], { type: "application/epub+zip" });
 }
 
 /* ---------- saved user templates ---------- */
@@ -445,7 +609,7 @@ function applyUserTpl(u) { const e = S.p.exp; DETAIL_KEYS.forEach(k => delete e[
 /* ---------- live HTML preview (true scale via container query units) ---------- */
 const SAMPLE_PARAS = ["Iskry padali na udupanú hlinu ako zlaté semená, ktoré nikdy nevyklíčia. Ilsa ich sledovala spod privretých viečok a počítala údery otcovho kladiva. Dvadsaťtri. Pri dvadsiatom štvrtom vždy zastal, utrel si čelo a povedal, že železo treba počúvať.", "Dnes nezastal.", "„Otec?“ Zdvihla hlavu od mecha. V dielni páchlo uhlím a niečím ďalším – ostrým, kovovým, ako vzduch pred búrkou. Otec stál nad nákovou so zdvihnutou rukou a hľadel na podkovu, ktorú kul celé ráno.", "Na jej rozžeravenom oblúku sa rozžiarila čiara. Tenká, rovná, a potom sa zalomila do tvaru, ktorý Ilsa nikdy nevidela, a predsa ho poznala. Tak ako človek pozná vlastné meno vyslovené v cudzom jazyku.", "„Nepozeraj sa na to,“ zašepkal otec. Kladivo mu vypadlo z ruky. „Ilsa, nepozeraj sa na to.“", "Ale ona sa už pozerala. A runa sa pozerala na ňu.", "V noci nemohla spať. Kedykoľvek zavrela oči, videla ten zalomený tvar, akoby jej ho niekto vypálil na vnútornú stranu viečok. Vstala, prešla bosá cez studenú kuchyňu a vošla do dielne.", "Podkova ležala tam, kde ju otec nechal. Vychladnutá, obyčajná, sivá. Ilsa ju zdvihla a palcom prešla po mieste, kde predtým žiarila čiara. Nič.", "Potom zobrala z poličky staré dláto a skôr, ako si to stihla rozmyslieť, ho priložila k železu."];
 function previewSample() {
-  const st = S.p ? bookStructure().find(s => s.type === "chapter") : null;
+  const st = S.p ? bookStructure().find(s => s.type === "chapter" && !s.loose) : null;
   let paras = [];
   if (st) st.texts.forEach(tx => { const d = new DOMParser().parseFromString("<div>" + (exportHtml(S.items[tx.id]?.html) || "") + "</div>", "text/html"); d.body.firstChild.querySelectorAll("p,blockquote").forEach(el => { const t = el.textContent.trim(); if (t && !el.classList.contains("sb") && paras.length < 40) paras.push(t); }); });
   if (paras.join(" ").length < 900) paras = paras.concat(SAMPLE_PARAS.map(x => tl(x)));
@@ -581,6 +745,7 @@ function renderExport(main) {
     ${ms ? "" : `<div class="card"><h3>Úvodné strany</h3>
       <label class="field"><span>Venovanie</span><textarea class="inp" id="xDed" rows="2" placeholder="Napríklad: Pre všetkých, ktorí sa nebáli tmy.">${esc(e.dedication || "")}</textarea></label>
       <label class="field"><span>Tiráž / copyright</span><textarea class="inp" id="xCopy" rows="2" placeholder="Ak necháš prázdne: © ${new Date().getFullYear()} ${esc(p.author || "Autor")}. Všetky práva vyhradené.">${esc(e.copyright || "")}</textarea></label></div>`}
+    ${appendixCard()}
     <div class="card"><h3>Popis knihy</h3>
       <label class="field"><span>Logline – jedna veta</span><input class="inp" id="dsLog" value="${esc(p.desc.logline || "")}" placeholder="Kováčova dcéra objaví zakázanú mágiu, ktorá jej za každú runu vezme jednu spomienku."></label>
       <label class="field"><span>Anotácia – text na obálku (cca 150 – 250 slov)</span><textarea class="inp" id="dsBlurb" rows="5">${esc(p.desc.blurb || "")}</textarea></label>
@@ -595,11 +760,13 @@ function renderExport(main) {
       </div>
       <div class="card"><h3>Stiahnuť</h3>
         <div class="dlrows">
-          <div class="dlrow"><div><b>Celá kniha</b><span>${ms ? "Titulná strana a text" : "Titulná strana, tiráž, venovanie, obsah a text"}</span></div><button class="btn sm primary" data-dl="full-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="full-docx">${I.dl}Word</button></div>
-          <div class="dlrow"><div><b>Len text knihy</b><span>Kapitoly bez úvodných strán – napr. ukážka prvých kapitol</span></div><button class="btn sm" data-dl="text-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="text-docx">${I.dl}Word</button></div>
-          <div class="dlrow"><div><b>Len obsah</b><span>Zoznam častí a kapitol${ms ? "" : " s číslami strán"}</span></div><button class="btn sm" data-dl="toc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="toc-docx">${I.dl}Word</button></div>
-          <div class="dlrow"><div><b>Popis knihy</b><span>Údaje, logline, anotácia a synopsa</span></div><button class="btn sm" data-dl="desc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="desc-docx">${I.dl}Word</button></div>
-          <div class="dlrow"><div><b>Ostatné</b><span>Čistý text a záloha projektu</span></div><button class="btn sm" data-dl="md">${I.dl}Markdown</button><button class="btn sm" data-dl="json">${I.dl}Záloha</button></div>
+          <div class="dlrow"><div><b>Celá kniha</b><span>${ms ? "Titulná strana a text" : "Titulná strana, tiráž, venovanie, obsah a text"}</span></div><div class="dlb"><button class="btn sm primary" data-dl="full-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="full-docx">${I.dl}Word</button><button class="btn sm" data-dl="full-epub">${I.dl}EPUB</button></div></div>
+          <div class="dlrow"><div><b>Len text knihy</b><span>Kapitoly bez úvodných strán – napr. ukážka prvých kapitol</span></div><div class="dlb"><button class="btn sm" data-dl="text-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="text-docx">${I.dl}Word</button><button class="btn sm" data-dl="text-epub">${I.dl}EPUB</button></div></div>
+          <div class="dlrow"><div><b>Pre beta čitateľov</b><span>Očíslované odseky (3.12) na pripomienky, označené ako pracovná verzia</span></div><div class="dlb"><button class="btn sm" data-dl="beta-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="beta-docx">${I.dl}Word</button><button class="btn sm" data-dl="beta-epub">${I.dl}EPUB</button></div></div>
+          <div class="dlrow"><div><b>Po kapitolách</b><span>Každá kapitola zvlášť v jednom ZIP – na konzultácie. <label class="chk" style="display:inline-flex"><input type="checkbox" id="eachNum"> s číslami odsekov</label></span></div><div class="dlb"><button class="btn sm" data-each="pdf">${I.dl}PDF</button><button class="btn sm" data-each="docx">${I.dl}Word</button><button class="btn sm" data-each="txt">${I.dl}Text</button></div></div>
+          <div class="dlrow"><div><b>Len obsah</b><span>Zoznam častí a kapitol${ms ? "" : " s číslami strán"}</span></div><div class="dlb"><button class="btn sm" data-dl="toc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="toc-docx">${I.dl}Word</button></div></div>
+          <div class="dlrow"><div><b>Popis knihy</b><span>Údaje, logline, anotácia a synopsa</span></div><div class="dlb"><button class="btn sm" data-dl="desc-pdf">${I.dl}PDF</button><button class="btn sm" data-dl="desc-docx">${I.dl}Word</button></div></div>
+          <div class="dlrow"><div><b>Ostatné</b><span>Čistý text a záloha projektu</span></div><div class="dlb"><button class="btn sm" data-dl="md">${I.dl}Markdown</button><button class="btn sm" data-dl="json">${I.dl}Záloha</button></div></div>
         </div>
         <span class="hint" id="xStatus">Word súbory používajú písmo ${esc((FONTS[FONTS[e.font]?.body ? e.font : t.body] || FONTS.Tinos).docx)}.</span>
       </div>
@@ -621,6 +788,7 @@ function renderExport(main) {
   bind("#xTitle", "title", false, false, p); bind("#xSub", "subtitle", false, false, p); bind("#xAuthor", "author", false, false, p); bind("#xGenre", "genre", false, false, p); bind("#xContact", "contact", false, false, p);
   $("#xLang").onchange = ev => { S.p.lang = ev.target.value; saveProject(); renderExport($("#main")); };
   bind("#xSize", "size"); bind("#xFont", "font"); bind("#xFs", "fs", true); bind("#xLh", "lh", true); bind("#xMar", "margins"); bind("#xAlign", "align"); bind("#xNum", "numbering"); bind("#xSb", "sceneBreak"); bind("#xQuotes", "quotes");
+  bindAppendixCard(main);
   bind("#xToc", "toc"); bind("#xRun", "runhead"); bind("#xDed", "dedication", false, false); bind("#xCopy", "copyright", false, false);
   bind("#dIndent", "indent", true); bind("#dGap", "gap", true); bind("#dOpener", "opener"); bind("#dHeadFont", "headFont"); bind("#dHeadScale", "headScale", true); bind("#dHeadAlign", "headAlign"); bind("#dHeadTop", "headTop", true); bind("#dFolio", "folio"); bind("#dEnd", "endMark"); bind("#dIndentFirst", "indentFirst"); bind("#dRecto", "recto");
   $("#detSet").addEventListener("toggle", ev => { S.detOpen = ev.target.open; });
@@ -639,17 +807,24 @@ function renderExport(main) {
   $("#synGen")?.addEventListener("click", () => { if ((p.desc.synopsis || "").trim()) { S.confirm = { type: "syn" }; rerender(); } else doGen(); });
   $("#synYes")?.addEventListener("click", doGen);
   $("#synNo")?.addEventListener("click", () => { S.confirm = null; rerender(); });
+  $$("[data-each]", main).forEach(b => b.onclick = async () => {
+    const st = $("#xStatus"); $$("[data-each],[data-dl]", main).forEach(x => x.disabled = true);
+    try { await exportEachChapter(b.dataset.each, $("#eachNum", main).checked, (i, n) => { st.textContent = tl("Pripravujem kapitolu {x} z {x}…", i, n); }); st.textContent = tl("Hotovo."); }
+    catch (err) { console.error(err); st.textContent = "Nepodarilo sa: " + (err.message || err); }
+    finally { $$("[data-each],[data-dl]", main).forEach(x => x.disabled = false); }
+  });
   $$("[data-dl]", main).forEach(b => b.onclick = async () => {
     const what = b.dataset.dl, st = $("#xStatus"), base = slug(p.title);
     if (what === "md") return saveFile(base + ".md", buildMarkdown(), "text/markdown");
     if (what === "json") return exportBackup(p.id);
     $$("[data-dl]", main).forEach(x => x.disabled = true); st.textContent = "Pripravujem súbor…";
     try {
-      const [mode, fmt] = what.split("-"), suffix = { full: "", text: "-text", toc: "-obsah", desc: "-popis" }[mode];
+      const [mode, fmt] = what.split("-"), suffix = { full: "", text: "-text", toc: "-obsah", desc: "-popis", beta: "-beta" }[mode];
       if (mode === "desc" && !descSections(t.lang || "sk").length) throw new Error("Popis je prázdny – vyplň logline, anotáciu alebo synopsu.");
-      const blob = fmt === "pdf" ? (mode === "desc" ? await buildDescPdf() : await buildPdf(mode)) : await buildDocx(mode);
+      const blob = fmt === "epub" ? await buildEpub(mode) : fmt === "pdf" ? (mode === "desc" ? await buildDescPdf() : await buildPdf(mode)) : await buildDocx(mode);
       st.textContent = "Hotovo – " + Math.max(1, Math.round(blob.size / 1024)) + " kB.";
-      await saveFile(base + suffix + (fmt === "pdf" ? ".pdf" : ".docx"), blob, fmt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      const ext = { pdf: [".pdf", "application/pdf"], docx: [".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"], epub: [".epub", "application/epub+zip"] }[fmt];
+      await saveFile(base + suffix + ext[0], blob, ext[1]);
     } catch (err) { console.error(err); st.textContent = "Nepodarilo sa: " + (err.message || err); }
     finally { $$("[data-dl]", main).forEach(x => x.disabled = false); }
   });

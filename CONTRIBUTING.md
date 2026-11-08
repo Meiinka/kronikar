@@ -8,7 +8,7 @@ Thanks for wanting to help! Bug reports and ideas go to [Issues](https://github.
 
 - **Your writing stays yours.** Kronikár must never send data anywhere. No analytics, trackers or remote calls besides optional font/library loading that already exists. PRs adding network calls will be declined.
 - **No build dependencies.** Plain HTML, CSS and JavaScript; the build is a single Python script with no dependencies.
-- **Keep data compatible.** Projects are stored as JSON (`title.kronikar.json`). New fields need sensible defaults so old projects still open.
+- **Keep data compatible.** In the folder, a book is `projekt.json`, `rukopis/<scene>.html`, `svet.json`, `poznamky.json`, `statistiky.json` pictures in `obrazky/` and scene versions in `verzie/` (see the top of `p10_sync.html`). New fields need sensible defaults so old projects still open; purely device-local state (expanded chapters, graph layout) must not end up in these files.
 - **Both languages.** Every new visible text must work in Slovak and English (see below).
 
 ## How the code is organised
@@ -24,7 +24,7 @@ src/parts/        the app, split into parts joined in the order of ORDER.txt
   p7_graph        relationship map
   p8_export       export helpers, Markdown, Project page
   p9_fonts        embedded font subsets for PDF export (generated, large)
-  p10_sync        auto-save to a folder (File System Access API), conflicts
+  p10_sync        folder sync: one subfolder per book, parts compared by hash, per-part conflicts, readable copy
   p11_refs        links (Instagram, YouTube…)
   p12_tpl         export templates, PDF (pdfmake) and DOCX builders, preview
   p13_pwa         installable app, loading pdfmake
@@ -33,6 +33,12 @@ src/parts/        the app, split into parts joined in the order of ORDER.txt
   p16_forms       name forms / Slovak declension suggestions
   p17_quotes      smart quotation marks
   p18_notes       sticky notes
+  p19_media       photos of world entries, maps with pins, pictures in the folder
+  p20_revise      scene versions, repetitions, names check, find & replace, sprints, reading aloud
+  p21_story       calendar and timeline, plot templates, character arcs
+  p22_extras      ages in scenes, family tree, journeys on maps, book appendices, plot threads, who knows what
+  p23_more        search everywhere, appearance from the text, name generator, dictation, tempo, relationships in time, scene card, calendar extras
+  p24_flows       magical currents: occurrence and density in sources, colour layer on maps
 src/i18n/         English translation (runtime.js + dictionaries en*.js)
 src/shell/        <head> for each build target
 pwa/              manifest, service worker, icons

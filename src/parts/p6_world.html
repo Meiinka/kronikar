@@ -21,16 +21,19 @@ function renderWorld(main) {
     </aside>
     <section class="pane left p-list" aria-label="Záznamy" style="border-right:1px solid var(--line)">
       <div class="pane-head"><button class="btn icon ghost backbtn" id="toCats" title="Kategórie">${I.back}</button><span class="lbl">${S.cat === "all" ? "Všetky záznamy" : esc((CAT[S.cat] || { name: "Záznamy" }).name)}</span>
-        <button class="btn sm primary" id="addEnt">${I.plus}Nový</button></div>
+        <button class="btn sm ghost" id="nameGen" title="Generátor mien – nové mená v zvuku tvojho sveta">${I.beat}<span>Mená</span></button><button class="btn sm primary" id="addEnt">${I.plus}Nový</button></div>
       <div class="searchbox">${I.search}<input class="inp" id="eq" placeholder="Hľadať vo svete" value="${esc(S.eq)}" autocomplete="off"></div>
+      <div class="wtools" id="wTools"></div><div class="mythf" id="mythF"></div><div class="mythf" id="placeF"></div><div class="mythf" id="stF"></div>
       <div class="elist" id="elist"></div>
     </section>
     <section class="edetail" id="edetail" aria-label="Detail záznamu"></section>
   </div>`;
   renderCatList();
   $("#toCats").onclick = () => { S.worldPane = "cats"; $("#world").className = "world m-cats"; };
+  $("#nameGen").onclick = () => openNameGen(S.cat);
   $("#addEnt").onclick = () => { newEnt(S.cat); renderWorld(main); setTimeout(() => $("#eName")?.focus(), 30); };
   $("#eq").oninput = debounce(e => { S.eq = $("#eq").value; renderEList(); }, 120);
+  mountWorldTools();
   renderEList(); renderEDetail();
 }
 function renderCatList() {
@@ -93,10 +96,36 @@ function renderEList() {
   const el = $("#elist"); if (!el) return;
   const q = norm(S.eq.trim());
   let list = entsBy(S.cat);
+  /* places: filter by whether they are on a map */
+  const pf = $("#placeF");
+  if (pf) {
+    if (!MAP_CATS.includes(S.cat) || !entsBy("mapa").length) { pf.innerHTML = ""; S.placeF = null; }
+    else { const all = entsBy(S.cat), on = all.filter(e => mapCount(e.id) > 0).length;
+      pf.innerHTML = `<button class="ncat${!S.placeF ? " on" : ""}" data-placef="">${esc(tl("Všetko"))} <b>${all.length}</b></button><button class="ncat${S.placeF === "on" ? " on" : ""}" data-placef="on">${esc(tl("Na mape"))} <b>${on}</b></button><button class="ncat${S.placeF === "off" ? " on" : ""}" data-placef="off" style="--nc:var(--warn)"><i></i>${esc(tl("Bez mapy"))} <b>${all.length - on}</b></button>`;
+      $$("[data-placef]", pf).forEach(b => b.onclick = () => { S.placeF = b.dataset.placef || null; renderEList(); });
+      if (S.placeF) list = list.filter(e => (mapCount(e.id) > 0) === (S.placeF === "on")); }
+  }
+  /* mythology: filter by group of kinds */
+  const mf = $("#mythF");
+  if (mf) {
+    if (S.cat !== "bozstvo") { mf.innerHTML = ""; S.mythF = null; }
+    else {
+      const gOf = e => mythGroup(keyFieldOf(e)?.v) || "Nezaradené", all = entsBy("bozstvo"), gs = [...MYTH_GROUPS.map(g => g[0]), "Iné", "Nezaradené"].filter(g => all.some(e => gOf(e) === g));
+      if (S.mythF && !gs.includes(S.mythF)) S.mythF = null;
+      mf.innerHTML = gs.length > 1 ? `<button class="ncat${!S.mythF ? " on" : ""}" data-mythf="">${esc(tl("Všetko"))} <b>${all.length}</b></button>${gs.map(g => `<button class="ncat${S.mythF === g ? " on" : ""}" data-mythf="${esc(g)}">${esc(tl(g))} <b>${all.filter(e => gOf(e) === g).length}</b></button>`).join("")}` : "";
+      $$("[data-mythf]", mf).forEach(b => b.onclick = () => { S.mythF = b.dataset.mythf || null; renderEList(); });
+      if (S.mythF) list = list.filter(e => gOf(e) === S.mythF);
+    }
+  }
+  list = estFilter(list);
   if (q) list = list.filter(e => norm(e.name + " " + (e.forms || []).join(" ") + " " + e.summary + " " + Object.values(e.fields || {}).join(" ") + " " + (e.tags || []).join(" ")).includes(q));
-  el.innerHTML = list.length ? list.map(e => `<button class="ecard${S.ent === e.id ? " sel" : ""}" data-ent="${e.id}" style="--cc:${catColor(e.cat)}">
-      ${S.cat === "all" || keyFieldOf(e)?.v ? `<span class="ek">${esc([S.cat === "all" ? CAT[e.cat]?.one : "", keyFieldOf(e)?.v].filter(Boolean).join(" · "))}</span>` : ""}<span class="en">${esc(e.name || "Bez mena")}</span>${e.summary ? `<span class="es">${esc(e.summary)}</span>` : ""}</button>`).join("")
+  const thumb = e => e.photos?.[0]?.id || e.map?.img || null;
+  const card = e => { try { return cardHtml(e); } catch (err) { console.warn("card", e, err); return `<button class="ecard" data-ent="${esc(e.id || "")}"><span class="en">${esc(String(e.name || tl("Bez mena")))}</span></button>`; } };
+  const cardHtml = e => `<button class="ecard${S.ent === e.id ? " sel" : ""}${thumb(e) ? " hasth" : ""}" data-ent="${e.id}" style="--cc:${catColor(e.cat)}">${noteBadge(e.id)}${thumb(e) ? `<span class="ethumb"><img data-img="${thumb(e)}" alt=""></span>` : ""}
+      ${S.cat === "all" || keyFieldOf(e)?.v ? `<span class="ek">${esc([S.cat === "all" ? CAT[e.cat]?.one : "", keyFieldOf(e)?.v].filter(Boolean).join(" · "))}</span>` : ""}${MAP_CATS.includes(e.cat) && entsBy("mapa").length ? (n => `<span class="mapbadge${n ? "" : " none"}" title="${esc(n ? tl("Na mapách: {x}", n) : tl("Nie je na žiadnej mape"))}">${I.pin}${n || "–"}</span>`)(mapCount(e.id)) : ""}<span class="en">${estDot(e)}${esc(e.name || "Bez mena")}${nicksOf(e).length ? ` <i class="nick no-tr">„${esc(nicksOf(e).join("“, „"))}“</i>` : ""}</span>${e.summary ? `<span class="es">${esc(e.summary)}</span>` : ""}</button>`;
+  el.innerHTML = list.length ? list.map(card).join("")
     : `<div class="empty">${q ? "Nič sa nenašlo." : "Zatiaľ prázdne. Pridaj prvý záznam tlačidlom Nový."}</div>`;
+  hydrateImgs(el);
   $$("[data-ent]", el).forEach(b => b.onclick = () => { S.catEdit = null; S.ent = b.dataset.ent; S.worldPane = "detail"; S.confirm = null; $("#world").className = "world m-detail"; $$(".ecard", el).forEach(x => x.classList.toggle("sel", x === b)); renderEDetail(); });
 }
 function entLinks(id) { return (S.p.links || []).filter(l => (l.a === id || l.b === id) && S.ents[l.a] && S.ents[l.b]); }
@@ -110,65 +139,75 @@ function renderEDetail() {
     return;
   }
   const cat = CAT[e.cat] || CAT.poznamka;
-  const fields = cat.fields.map((f, i) => { const fn = fieldName(f), v = e.fields?.[fn] || "";
-    if (typeof f === "object" && f.opts) return `<label class="field keyfield${f.key && !v ? " need" : ""}"><span>${esc(fn)}${f.key ? " *" : ""}</span><input class="inp" list="fo-${i}" data-field="${esc(fn)}" value="${esc(v)}" placeholder="Vyber alebo napíš vlastný" autocomplete="off"><datalist id="fo-${i}">${f.opts.map(x => `<option value="${esc(x)}">`).join("")}</datalist>${f.key && !v ? `<small class="hint">Povinné pole – vyplň ho.</small>` : ""}</label>`;
-    return `<label class="field"><span>${esc(fn)}</span><textarea class="inp" rows="1" data-field="${esc(fn)}">${esc(v)}</textarea></label>`; }).join("");
+  const fields = catFieldList(e.cat).map((l, i) => { const fn = l.fn, f = l.def || fn, v = e.fields?.[fn] || "";
+    if (typeof f === "object" && f.opts) return `<label class="field keyfield${f.key && !f.soft && !v ? " need" : ""}"><span>${fieldLabelHtml(l)}${f.key && !f.soft ? " *" : ""}</span><input class="inp" list="fo-${i}" data-field="${esc(fn)}" value="${esc(v)}" placeholder="Vyber alebo napíš vlastný" autocomplete="off"><datalist id="fo-${i}">${f.opts.map(x => `<option value="${esc(x)}"${e.cat === "bozstvo" ? ` label="${esc(tl(mythGroup(x)))}"` : ""}>`).join("")}</datalist>${f.key && !v ? `<small class="hint">Povinné pole – vyplň ho.</small>` : ""}</label>`;
+    return `<label class="field"><span>${fieldLabelHtml(l)}</span><textarea class="inp" rows="1" data-field="${esc(fn)}">${esc(v)}</textarea></label>`; }).join("");
   const custom = (e.custom || []).map((c, i) => `<div class="field"><div class="fx"><input class="inp" data-cl="${i}" value="${esc(c.label)}" placeholder="Názov poľa" style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 6px"><button data-crm="${i}" title="Odstrániť pole">×</button></div><textarea class="inp" rows="1" data-cv="${i}">${esc(c.value || "")}</textarea></div>`).join("");
   const links = entLinks(e.id);
   const relRow = l => {
     const out = l.a === e.id, other = S.ents[out ? l.b : l.a];
     if (S.relEdit === l.id) return `<div class="relform"><div class="fgrid">
         <label class="field"><span>Vzťah ${out ? "(" + esc(e.name || "tento") + " → " + esc(other.name) + ")" : "(" + esc(other.name) + " → " + esc(e.name || "tento") + ")"}</span><input class="inp" id="reLabel" value="${esc(l.label)}" list="reSug" autocomplete="off"><datalist id="reSug">${relSuggest(S.ents[l.a].cat, S.ents[l.b].cat).map(x => `<option value="${esc(x)}">`).join("")}</datalist></label>
-        <label class="field"><span>Kedy (voliteľné)</span><input class="inp" id="reWhen" value="${esc(l.when || "")}" placeholder="napr. do kapitoly 7, pred vojnou, od Noci veží" autocomplete="off"></label></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="reBi"${l.bi ? " checked" : ""}> ${esc(tl("Obojstranný vzťah – platí aj opačne"))}</label>
+      <label class="field rebi"${l.bi ? "" : " hidden"}><span>${esc(tl("Opačne"))} (${esc(S.ents[l.b].name || "")} → ${esc(S.ents[l.a].name || "")}) <small class="hint">${esc(tl("prázdne = rovnako"))}</small></span><input class="inp" id="reRev" value="${esc(l.rev || "")}" list="reSugR" placeholder="${esc(l.label)}" autocomplete="off"><datalist id="reSugR">${relSuggest(S.ents[l.b].cat, S.ents[l.a].cat).map(x => `<option value="${esc(x)}">`).join("")}</datalist></label>
+      <div class="relwhen">${relTimeFields(l)}</div>
       <label class="chk"><input type="checkbox" id="rePast"${l.past ? " checked" : ""}> Vzťah už neplatí (minulý)</label>
       <div class="btnrow"><button class="btn sm primary" id="reSave">Uložiť</button><button class="btn sm" id="reCancel">Zrušiť</button></div></div>`;
-    return `<div class="rel${l.past ? " past" : ""}"><button class="lab" data-reledit="${l.id}" title="Upraviť vzťah">${out ? esc(l.label) + " →" : "← " + esc(l.label)}</button>
-      <button class="tgt" data-goent="${other.id}"><span class="cd" style="background:${catColor(other.cat)}"></span><span>${esc(other.name || "Bez mena")}</span><small class="hint">${esc(CAT[other.cat]?.one || "")}${l.when ? " · " + esc(l.when) : ""}</small></button>
+    return `<div class="rel${l.past ? " past" : ""}"><button class="lab" data-reledit="${l.id}" title="Upraviť vzťah">${esc(relText(l, e.id))}</button>
+      <button class="tgt" data-goent="${other.id}"><span class="cd" style="background:${catColor(other.cat)}"></span><span>${esc(other.name || "Bez mena")}</span><small class="hint">${esc(CAT[other.cat]?.one || "")}${relWhen(l) ? ` · <span class="no-tr">${esc(relWhen(l))}</span>` : ""}</small></button>
       <button class="btn sm ghost pastbtn" data-relpast="${l.id}" title="${l.past ? "Označiť znova ako aktuálny" : "Označiť ako neaktuálny – vzťah už neplatí"}">${l.past ? "minulý" : "aktuálny"}</button>
       <button class="btn icon ghost" data-rmlink="${l.id}" title="Odstrániť prepojenie">×</button></div>`;
   };
   const curL = links.filter(l => !l.past), pastL = links.filter(l => l.past);
   const rels = curL.map(relRow).join("") + (pastL.length ? `<div class="relsep">Minulé vzťahy · ${pastL.length}</div>` + pastL.map(relRow).join("") : "");
   // occurrences
-  const occ = []; let mentionTotal = 0;
-  allTexts().forEach(n => {
-    const why = [];
-    if (n.pov === e.id) why.push("rozprávač"); if (n.place === e.id) why.push("miesto deja"); if ((n.ents || []).includes(e.id)) why.push("priradené");
-    const m = e.name && e.name.trim().length > 1 ? findMentions(e, S.items[n.id]?.html) : null;
-    if (m) { why.push("v texte " + m.count + "×"); mentionTotal += m.count; }
-    if (why.length) occ.push({ n, why, snip: m ? m.snippet : "" });
-  });
+  const { occ, total: mentionTotal } = entOccurrences(e);
+  const isMap = e.cat === "mapa";
   const sugg = suggestForms(e);
   const conf = S.confirm && S.confirm.type === "ent" && S.confirm.id === e.id;
   el.innerHTML = `<div class="edetail-in">
     <div class="ehead" style="--cc:${catColor(e.cat)}">
       <div class="kind"><button class="btn icon ghost backbtn" id="toList" title="Späť na zoznam">${I.back}</button>
-        <span class="badge">${esc(cat.one)}</span>${keyFieldOf(e) ? `<span class="badge soft" id="keyBadge"${keyFieldOf(e).v ? "" : " hidden"}>${esc(keyFieldOf(e).v)}</span>` : ""}
+        <span class="badge">${esc(cat.one)}</span>${estSelectHtml(e)}${keyFieldOf(e) ? `<span class="badge soft" id="keyBadge"${keyFieldOf(e).v ? "" : " hidden"}>${esc(keyFieldOf(e).v)}</span>` : ""}
         <select class="inp" id="eCat" style="width:auto;font-size:12px;padding:3px 6px" aria-label="Kategória">${CATS.map(c => `<option value="${c.id}"${c.id === e.cat ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
         <span class="spacer" style="flex:1"></span>
-        <button class="btn sm" id="eGraph">${I.net}Ukázať vo vzťahoch</button></div>
+        <button class="btn sm ghost" id="eOrder" title="Usporiadať časti karty – pre všetky záznamy v kategórii">${I.layers}<span>Usporiadať</span></button><button class="btn sm" id="eGraph">${I.net}Ukázať vo vzťahoch</button></div>
+      <div class="eheadrow">${isMap ? "" : `<button class="eav${e.photos?.length ? " has" : ""}" id="eAv" title="Fotografie" aria-label="Fotografie">${e.photos?.length ? `<img data-img="${e.photos[0].id}" alt="">` : I.img}</button>`}<div class="eheadtx">
       <input class="ename" id="eName" value="${esc(e.name)}" placeholder="Meno / názov" aria-label="Meno">
-      <textarea class="esum" id="eSum" rows="1" placeholder="Jednou vetou: kto alebo čo to je?">${esc(e.summary || "")}</textarea>
+      <textarea class="esum" id="eSum" rows="1" placeholder="Jednou vetou: kto alebo čo to je?">${esc(e.summary || "")}</textarea></div></div>
     </div>
-    <div class="card"><h3>Vlastnosti<span class="spacer"></span><button class="btn sm ghost" id="addField">${I.plus}Vlastné pole</button></h3>
+    ${isMap ? `<div class="card mapcard" id="eMap" data-card="mapa"></div>` : ""}
+    <div class="card" id="eMapsOf" data-card="namape" hidden></div>
+    <div class="card" data-card="vlastnosti"><h3>Vlastnosti<span class="spacer"></span><button class="btn sm ghost" id="fieldCfg" title="${esc(tl("Poradie, skrytie a názvy polí – pre celú kategóriu"))}">${I.layers}<span>${esc(tl("Polia"))}</span></button><button class="btn sm ghost" id="addField">${I.plus}Vlastné pole</button></h3>
       ${fields || custom ? `<div class="fgrid">${fields}${custom}</div>` : '<div class="empty">Táto kategória nemá predvolené polia. Pridaj si vlastné.</div>'}</div>
-    <div class="card"><h3>Prepojenia <span class="mono" style="letter-spacing:0">${curL.length || ""}</span></h3>
+    <div class="card" id="eFlows" data-card="prudy"></div>
+    <div class="card" id="eLook" data-card="vzhlad"></div>
+    <div class="card" id="eStickies" data-card="lepiky"></div>
+    <div class="card" id="ePhotos" data-card="foto"></div>
+    <div class="card" id="ePlot" data-card="linia"></div>
+    <div class="card" id="eArc" data-card="oblk"></div>
+    <div class="card" id="eTime" data-card="cas"></div>
+    <div class="card" id="eHist" data-card="dejiny"></div>
+    <div class="card" data-card="prepojenia"><h3>Prepojenia <span class="mono" style="letter-spacing:0">${curL.length || ""}</span></h3>
       <div class="rels">${rels || '<div class="empty">Zatiaľ bez prepojení. Napríklad: postava → ovláda → mágia.</div>'}</div>
       <div class="addrel">
         <input class="inp" id="relLabel" list="relSug" placeholder="Vzťah (napr. ovláda)" autocomplete="off">
         <select class="inp" id="relTarget"><option value="">Vyber záznam…</option>${allEntOptions([e.id])}</select>
+        <label class="chk relbi" title="${esc(tl("Obojstranný vzťah – platí aj opačne"))}"><input type="checkbox" id="relBi"> ↔ ${esc(tl("obojstranný"))}</label>
         <button class="btn primary" id="relAdd">${I.link}Prepojiť</button>
-      </div><datalist id="relSug"></datalist>
+      </div><datalist id="relSug"></datalist><button class="lnk hint rt-open" data-reltypes>${esc(tl("Upraviť zoznam vzťahov"))}</button>
       <span class="hint">Smer: <b>${esc(e.name || "tento záznam")}</b> → vzťah → vybraný záznam. Keď sa vzťah zmení (postava odíde, pohádajú sa), klikni na „aktuálny“ a označ ho ako minulý; potom pridaj nový vzťah.</span>
     </div>
-    <div class="card"><h3>Tvary mena a prezývky <span class="mono" style="letter-spacing:0">${(e.forms || []).length || ""}</span></h3>
+    <div class="card" data-card="tvary"><h3>Tvary mena a prezývky <span class="mono" style="letter-spacing:0">${(e.forms || []).length || ""}</span></h3>
       <div class="chips">${(e.forms || []).map((f, i) => `<span class="chip">${esc(f)}<button class="x" data-rmform="${i}" aria-label="Odobrať tvar">×</button></span>`).join("") || '<span class="hint">Zatiaľ len základný tvar. Pridaj skloňované tvary, prezývky či tituly, podľa ktorých ho Kronikár nájde v texte.</span>'}</div>
       <div class="addrel" style="grid-template-columns:minmax(0,1fr) auto"><input class="inp" id="formIn" placeholder="Napr. Ilsou, Ilsy, malá Vranová (viac oddeľ čiarkou)" autocomplete="off"><button class="btn" id="formAdd">${I.plus}Pridať</button></div>
       ${sugg.length ? `<div class="sugg"><span class="lbl">Návrhy skloňovania</span><div class="chips">${sugg.map(f => `<button class="chip link sg" data-addform="${esc(f)}">+ ${esc(f)}</button>`).join("")}</div><div class="btnrow"><button class="btn sm" id="formAll">Pridať všetky návrhy</button><span class="hint">Návrhy sú automatické – pridaj len tie správne.</span></div></div>` : ""}
     </div>
-    <div class="card" data-refcount><h3>Odkazy <span class="rc mono" style="letter-spacing:0"></span></h3><div id="eRefs"></div><span class="hint">Napríklad inšpirácia na Instagrame, hudba na YouTube či Spotify, mapy, obrázky.</span></div>
-    <div class="card"><h3>Poznámky</h3><div class="notes-ed" id="eNotes" contenteditable="true" lang="${bookLang()}" data-ph="${esc(tl("Dejiny, legendy, nápady, citáty… všetko, čo sa nezmestí do políčok."))}"></div></div>
-    <div class="card"><h3>V rukopise${mentionTotal ? ` <span class="mono" style="letter-spacing:0">${mentionTotal}×</span>` : ""}</h3>${occ.length ? `<div class="occ">${occ.map(o => `<button data-goscene="${o.n.id}" class="occrow"><span class="ot">${esc(o.n.title)} <small>${o.why.join(" · ")}</small></span>${o.snip ? `<span class="osnip">${esc(o.snip).replace("«", "<mark>").replace("»", "</mark>")}</span>` : ""}</button>`).join("")}</div>` : '<div class="empty">Zatiaľ sa v rukopise nespomína.</div>'}</div>
+    <div class="card" data-card="odkazy" data-refcount><h3>Odkazy <span class="rc mono" style="letter-spacing:0"></span></h3><div id="eRefs"></div><span class="hint">Napríklad inšpirácia na Instagrame, hudba na YouTube či Spotify, mapy, obrázky.</span></div>
+    <div class="card" data-card="poznamky"><h3>Poznámky</h3><div class="notes-ed" id="eNotes" contenteditable="true" lang="${bookLang()}" data-ph="${esc(tl("Dejiny, legendy, nápady, citáty… všetko, čo sa nezmestí do políčok."))}"></div></div>
+    <div class="card" data-card="rukopis"><h3>V rukopise${mentionTotal ? ` <span class="mono" style="letter-spacing:0">${mentionTotal}×</span>` : ""}</h3>${occ.length ? `<div class="occ">${occ.map(o => `<div class="occrow2"><button data-goscene="${o.n.id}" class="occrow"><span class="ot">${sceneChapterTitle(o.n) ? esc(sceneChapterTitle(o.n)) + " › " : ""}${esc(o.n.title)} <small>${o.why.join(" · ")}</small></span>${o.snip ? `<span class="osnip">${esc(o.snip).replace("«", "<mark>").replace("»", "</mark>")}</span>` : ""}</button>${o.assigned ? `<button class="btn icon ghost" data-unassign="${o.n.id}" title="Zrušiť priradenie" aria-label="Zrušiť priradenie">×</button>` : ""}</div>`).join("")}</div>` : '<div class="empty">Zatiaľ sa v rukopise nespomína.</div>'}
+      ${isMap ? "" : `<div class="addrel" style="grid-template-columns:minmax(0,1fr)"><select class="inp" id="eAssign"><option value="">Priradiť ku kapitole alebo scéne…</option>${assignOptions()}</select></div><span class="hint">${e.cat === "krajina" ? "Miesto sa nastaví ako miesto deja scény (ak ho scéna ešte nemá), inak sa k nej priradí." : "Záznam sa priradí ku scéne – uvidíš ho aj v jej inšpektore."}</span>`}</div>
     <div>${conf ? `<div class="confirm"><b>Zmazať „${esc(e.name || "záznam")}“?</b><span>Odstránia sa aj ${links.length} ${plural(links.length, "prepojenie", "prepojenia", "prepojení")}.</span><div class="btnrow"><button class="btn sm danger solid" id="eDelYes">Zmazať</button><button class="btn sm" id="eDelNo">Ponechať</button></div></div>` : `<button class="btn sm danger" id="eDel">${I.trash}Zmazať záznam</button>`}</div>
   </div>`;
   const notes = $("#eNotes"); notes.innerHTML = e.notes || "";
@@ -178,7 +217,7 @@ function renderEDetail() {
   $("#eName").oninput = ev => { e.name = ev.target.value; sv(); listRefresh(); };
   const sum = $("#eSum"); autoGrow(sum); sum.oninput = () => { e.summary = sum.value; autoGrow(sum); sv(); listRefresh(); };
   $("#eCat").onchange = ev => { e.cat = ev.target.value; saveEnt(e.id); renderWorld($("#main")); };
-  $$("[data-field]", el).forEach(t => { const ta = t.tagName === "TEXTAREA"; if (ta) autoGrow(t); t.oninput = () => { e.fields = e.fields || {}; e.fields[t.dataset.field] = t.value; if (ta) autoGrow(t); else { const lf = t.closest(".keyfield"); if (lf) { lf.classList.toggle("need", !t.value.trim()); const kb = $("#keyBadge"); if (kb) { kb.textContent = t.value; kb.hidden = !t.value.trim(); } } listRefresh(); } sv(); }; });
+  $$("[data-field]", el).forEach(t => { const ta = t.tagName === "TEXTAREA"; if (ta) autoGrow(t); t.oninput = () => { e.fields = e.fields || {}; e.fields[t.dataset.field] = t.value; if (ta) autoGrow(t); else { const lf = t.closest(".keyfield"); if (lf) { if (lf.querySelector("span")?.textContent.endsWith("*")) lf.classList.toggle("need", !t.value.trim()); const kb = $("#keyBadge"); if (kb) { kb.textContent = t.value; kb.hidden = !t.value.trim(); } } listRefresh(); } sv(); }; });
   $$("[data-cv]", el).forEach(t => { autoGrow(t); t.oninput = () => { e.custom[+t.dataset.cv].value = t.value; autoGrow(t); sv(); }; });
   $$("[data-cl]", el).forEach(t => t.oninput = () => { e.custom[+t.dataset.cl].label = t.value; sv(); });
   $$("[data-crm]", el).forEach(b => b.onclick = () => { e.custom.splice(+b.dataset.crm, 1); saveEnt(e.id); renderEDetail(); });
@@ -198,25 +237,47 @@ function renderEDetail() {
   sug(); tgt.onchange = sug;
   $("#relAdd").onclick = () => {
     if (!tgt.value) { toast("Vyber, s čím chceš záznam prepojiť."); tgt.focus(); return; }
-    const label = lab.value.trim() || "súvisí s";
-    S.p.links.push({ id: uid("l"), a: e.id, b: tgt.value, label }); saveProject(); renderEDetail(); toast("Prepojené.");
+    const o = S.ents[tgt.value], b = tgt.value, bi = $("#relBi").checked;
+    relCheck(lab.value.trim() || "súvisí s", e.cat, o?.cat, label => { S.p.links.push(Object.assign({ id: uid("l"), a: e.id, b, label }, bi ? { bi: true } : {})); saveProject(); renderEDetail(); toast("Prepojené."); });
   };
-  $$("[data-relpast]", el).forEach(b => b.onclick = () => { const l = S.p.links.find(x => x.id === b.dataset.relpast); if (!l) return; l.past = !l.past; if (l.past && !l.when) { S.relEdit = l.id; } saveProject(); renderEDetail(); if (S.relEdit) setTimeout(() => $("#reWhen")?.focus(), 30); });
+  $$("[data-relpast]", el).forEach(b => b.onclick = () => { const l = S.p.links.find(x => x.id === b.dataset.relpast); if (!l) return; l.past = !l.past; if (l.past && !l.when) { S.relEdit = l.id; } saveProject(); renderEDetail(); if (S.relEdit) setTimeout(() => $(".relwhen [data-rw]")?.focus(), 30); });
   $$("[data-reledit]", el).forEach(b => b.onclick = () => { S.relEdit = b.dataset.reledit; renderEDetail(); setTimeout(() => $("#reLabel")?.focus(), 30); });
   $("#reCancel")?.addEventListener("click", () => { S.relEdit = null; renderEDetail(); });
-  const reSave = () => { const l = S.p.links.find(x => x.id === S.relEdit); if (l) { l.label = $("#reLabel").value.trim() || l.label; l.when = $("#reWhen").value.trim(); l.past = $("#rePast").checked; saveProject(); } S.relEdit = null; renderEDetail(); };
+  $("#reBi")?.addEventListener("change", ev => { const f = $(".rebi", el); if (f) f.hidden = !ev.target.checked; });
+  const reSave = () => { const l = S.p.links.find(x => x.id === S.relEdit); if (!l) { S.relEdit = null; renderEDetail(); return; } const box = $(".relwhen", el), past = $("#rePast").checked; readRelTime(box, l); l.past = past; l.bi = $("#reBi").checked || undefined; const rv = ($("#reRev")?.value || "").trim(); if (l.bi && rv) { l.rev = rv; relCommit(rv, S.ents[l.b]?.cat, S.ents[l.a]?.cat); } else delete l.rev; if (!l.bi) delete l.bi; relCheck($("#reLabel").value.trim() || l.label, S.ents[l.a]?.cat, S.ents[l.b]?.cat, lab => { l.label = lab; saveProject(); S.relEdit = null; renderEDetail(); }); };
   $("#reSave")?.addEventListener("click", reSave);
-  ["#reLabel", "#reWhen"].forEach(id => $(id)?.addEventListener("keydown", ev => { if (ev.key === "Enter") reSave(); }));
+  $("#reLabel")?.addEventListener("keydown", ev => { if (ev.key === "Enter") reSave(); });
   $$("[data-rmlink]", el).forEach(b => b.onclick = () => { S.p.links = S.p.links.filter(l => l.id !== b.dataset.rmlink); saveProject(); renderEDetail(); });
   $$("[data-goent]", el).forEach(b => b.onclick = () => { S.ent = b.dataset.goent; S.confirm = null; renderEList(); renderEDetail(); $("#edetail").scrollTop = 0; });
-  $$("[data-goscene]", el).forEach(b => b.onclick = () => { S.sel = b.dataset.goscene; S.mode = "write"; $$("[data-mode]").forEach(x => x.classList.toggle("on", x.dataset.mode === "write")); renderMode(); });
+  $$("[data-goscene]", el).forEach(b => b.onclick = () => goScene(b.dataset.goscene));
+  $$("[data-unassign]", el).forEach(b => b.onclick = () => { unassignEnt(e.id, b.dataset.unassign); renderEDetail(); });
+  $("#eAssign")?.addEventListener("change", ev => { const n = assignEnt(e.id, ev.target.value); renderEDetail(); toast(n ? tl("Priradené.") : tl("Už je priradené.")); });
+  mountPhotos($("#ePhotos"), e); hydrateImgs($(".ehead", el));
+  $("#eAv")?.addEventListener("click", async () => { if (e.photos?.length) openLightbox(e, 0); else addPhotos(e, await pickFiles(true)); });
+  if (isMap) mountMap($("#eMap"), e); else mountMapsOf($("#eMapsOf"), e);
+  entExtras(el, e);
+  mountNoteEnt($("#eStickies", el), e);
+  mountLooks($("#eLook", el), e);
+  mountFlowCard($("#eFlows", el), e);
+  mountCharPlot($("#ePlot", el), e);
+  mountPlaceHistory($("#eHist", el), e);
+  bindEst(el, e);
+  $("#fieldCfg", el)?.addEventListener("click", () => openFieldCfg(e.cat));
+  applyCardOrder(el, e);
+  $("#eOrder", el)?.addEventListener("click", () => openCardOrder(el, e));
   $("#eGraph").onclick = () => { S.graph.sel = e.id; S.graph.root = e.id; S.mode = "graph"; $$("[data-mode]").forEach(x => x.classList.toggle("on", x.dataset.mode === "graph")); renderMode(); };
   $("#eDel")?.addEventListener("click", () => { S.confirm = { type: "ent", id: e.id }; renderEDetail(); });
   $("#eDelNo")?.addEventListener("click", () => { S.confirm = null; renderEDetail(); });
   $("#eDelYes")?.addEventListener("click", () => deleteEnt(e.id));
 }
 function deleteEnt(id) {
+  const gone = S.ents[id];
+  (gone?.photos || []).forEach(p => dropImage(p.id)); if (gone?.map?.img) dropImage(gone.map.img);
   delete S.ents[id]; qdel(entPath(S.p.id, id));
+  Object.values(S.ents).forEach(m => { const mp = m.map; if (!mp) return; let ch = false;
+    if (mp.pins?.some(p => p.ent === id)) { mp.pins = mp.pins.filter(p => p.ent !== id); ch = true; }
+    [...(mp.areas || []), ...(mp.routes || [])].forEach(it => { if (it.ent === id) { it.ent = null; if (!it.name && gone?.name) it.name = gone.name; ch = true; } });
+    if (ch) saveEnt(m.id); });
   S.p.links = S.p.links.filter(l => l.a !== id && l.b !== id);
   delete (S.p.graphPos || {})[id];
   allTexts().forEach(n => { if (n.pov === id) n.pov = null; if (n.place === id) n.place = null; if (n.ents) n.ents = n.ents.filter(x => x !== id); });

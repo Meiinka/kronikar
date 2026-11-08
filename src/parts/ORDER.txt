@@ -12,6 +12,13 @@ p15_selpop.html
 p6_world.html
 p7_graph.html
 p10_sync.html
+p19_media.html
+p20_revise.html
+p21_story.html
+p22_extras.html
+p23_more.html
+p24_flows.html
+p25_world2.html
 p11_refs.html
 p9_fonts.html
 p12_tpl.html

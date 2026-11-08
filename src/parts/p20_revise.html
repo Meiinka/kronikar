@@ -1,0 +1,563 @@
+<script>
+/* ================= writing & revision tools =================
+   snapshots of scenes, repetition check, names missing from the world, find & replace,
+   writing sprints, reading aloud */
+Object.assign(I, {
+  hist: '<svg viewBox="0 0 16 16"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 5v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  rep: '<svg viewBox="0 0 16 16"><path d="M2 5h5M2 11h5M9 5h5M9 11h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M3 7.5h3M10 7.5h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".5"/></svg>',
+  speak: '<svg viewBox="0 0 16 16"><path d="M2.5 6h2.5L8.5 3v10L5 10H2.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6 6 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  timer: '<svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 6v3l2 1.5M6.5 1.8h3M12.5 4l1-1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  tools: '<svg viewBox="0 0 16 16"><path d="M10.5 2.5a3 3 0 0 0-2.9 3.8L2.8 11.1a1.4 1.4 0 0 0 2 2l4.8-4.8a3 3 0 0 0 3.8-3.8l-1.8 1.8-1.7-.4-.4-1.7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  play: '<svg viewBox="0 0 16 16"><path d="M5 3l8 5-8 5z" fill="currentColor"/></svg>',
+  pause: '<svg viewBox="0 0 16 16"><path d="M4.5 3h2.5v10H4.5zM9 3h2.5v10H9z" fill="currentColor"/></svg>',
+  stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>',
+});
+const hasHL = () => !!(window.CSS && CSS.highlights && window.Highlight);
+const sceneTitleFull = n => { const ct = sceneChapterTitle(n); return (ct ? ct + " › " : "") + (n.title || tl("Bez názvu")); };
+function fmtWhen(ts) { const d = new Date(ts); return d.toLocaleDateString(LANG === "en" ? "en-GB" : "sk-SK", { day: "numeric", month: "short", year: "numeric" }) + " " + d.toLocaleTimeString(LANG === "en" ? "en-GB" : "sk-SK", { hour: "2-digit", minute: "2-digit" }); }
+function modal(html, cls = "") {
+  document.querySelector(".kmodal")?.remove();
+  const ov = document.createElement("div"); ov.className = "kmodal " + cls; ov.innerHTML = `<div class="kmodal-in" role="dialog">${html}</div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); document.removeEventListener("keydown", key); };
+  const key = ev => { if (ev.key === "Escape") close(); };
+  document.addEventListener("keydown", key);
+  ov.addEventListener("pointerdown", ev => { if (ev.target === ov) close(); });
+  $$("[data-close]", ov).forEach(b => b.onclick = close);
+  return { el: ov, close };
+}
+
+/* ---------- 1. snapshots of a scene ----------
+   kept in IndexedDB (snap/<project>/<scene>) and as readable files <book>/verzie/<scene>--<version>.html.
+   A version never changes; `up` marks one that has been in the folder (missing there later = deleted elsewhere). */
+const SNAP = {
+  key: (pid, sid) => "snap/" + pid + "/" + sid,
+  async list(pid, sid) { try { return (await idb.get(this.key(pid, sid))) || []; } catch { return []; } },
+  async put(pid, sid, list) { try { await idb.set(this.key(pid, sid), list); } catch (e) { console.warn("snap", e); } },
+  async add(sid, label, auto) {
+    if (!S.p) return null;
+    const pid = S.p.id, it = S.items[sid], n = findNode(sid)?.n; if (!it || !n) return null;
+    const html = it.html || "", list = await this.list(pid, sid);
+    if (auto && list.length && list[list.length - 1].html === html) return null;
+    const s = { id: uid("v"), at: Date.now(), label: label || "", html, words: countWords(htmlToText(html)), title: n.title || "", auto: !!auto, up: false };
+    list.push(s);
+    /* keep at most 40 automatic versions of one scene */
+    const autos = list.filter(x => x.auto); if (autos.length > 40) { const drop = new Set(autos.slice(0, autos.length - 40).map(x => x.id)); for (let i = list.length - 1; i >= 0; i--) if (drop.has(list[i].id)) { Sync.removeSnap(pid, sid, list[i].id); list.splice(i, 1); } }
+    await this.put(pid, sid, list);
+    Sync.putSnap(pid, sid, s);
+    return s;
+  },
+  async del(sid, vid) { const pid = S.p.id, list = (await this.list(pid, sid)).filter(x => x.id !== vid); await this.put(pid, sid, list); Sync.removeSnap(pid, sid, vid); },
+};
+const snapFile = (sid, vid) => "verzie/" + sid + "--" + vid + ".html";
+function snapHtml(sid, s, lang) {
+  const meta = esc(JSON.stringify({ scene: sid, id: s.id, at: s.at, label: s.label, auto: s.auto, title: s.title }));
+  return `<!doctype html>\n<html lang="${lang}"><head><meta charset="utf-8"><meta name="kronikar-version" content="${meta}"><title>${esc(s.title)} – ${esc(s.label || fmtWhen(s.at))}</title>\n<style>body{font-family:Georgia,serif;max-width:40em;margin:2em auto;line-height:1.6;padding:0 1em}header{color:#666;font-family:sans-serif;font-size:.9em}</style></head>\n<body>\n<header>${esc(s.label || "")} · ${esc(new Date(s.at).toISOString().slice(0, 16).replace("T", " "))}</header>\n<h1>${esc(s.title)}</h1>\n<article>\n${s.html}\n</article>\n</body>\n</html>\n`;
+}
+function parseSnapFile(text) {
+  const d = new DOMParser().parseFromString(text, "text/html"), m = d.querySelector('meta[name="kronikar-version"]'), a = d.querySelector("article");
+  if (!m || !a) return null;
+  try { const j = JSON.parse(m.getAttribute("content")); const html = a.innerHTML.trim(); return { id: j.id, at: j.at, label: j.label || "", auto: !!j.auto, title: j.title || "", html, words: countWords(htmlToText(html)), up: true, scene: j.scene }; } catch { return null; }
+}
+Object.assign(Sync, {
+  async putSnap(pid, sid, s) {
+    if (this.state !== "ok") return;
+    try { const dir = await this.bookDir(pid, S.p && S.p.id === pid ? S.p.title : "", true); await this.writePath(dir, snapFile(sid, s.id), snapHtml(sid, s, (S.p && S.p.lang) || "sk")); const list = await SNAP.list(pid, sid), x = list.find(v => v.id === s.id); if (x && !x.up) { x.up = true; await SNAP.put(pid, sid, list); } }
+    catch (e) { console.warn("snap write", e); }
+  },
+  async removeSnap(pid, sid, vid) { if (this.state !== "ok") return; try { const dir = await this.bookDir(pid, "", false); if (dir) await this.removePath(dir, snapFile(sid, vid)); } catch { } },
+  async syncSnaps(pid, dir, doc) {
+    const inFolder = new Map();
+    try { const d = await dir.getDirectoryHandle("verzie"); for await (const [name, h] of d.entries()) { const mm = /^(.+)--(.+)\.html$/.exec(name); if (mm && h.kind !== "directory" && !this.isConflict(name)) inFolder.set(mm[1] + "/" + mm[2], h); } } catch { }
+    const scenes = textNodes(doc.binder).map(n => n.id), live = new Set(scenes);
+    const lists = {};
+    for (const sid of scenes) lists[sid] = await SNAP.list(pid, sid);
+    for (const sid of scenes) {
+      let ch = false; const list = lists[sid];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const s = list[i], k = sid + "/" + s.id;
+        if (inFolder.has(k)) { if (!s.up) { s.up = true; ch = true; } inFolder.delete(k); continue; }
+        if (s.up) { list.splice(i, 1); ch = true; continue; }          /* deleted on another device */
+        try { await this.writePath(dir, snapFile(sid, s.id), snapHtml(sid, s, doc.lang || "sk")); s.up = true; ch = true; } catch (e) { console.warn("snap write", e); }
+      }
+      if (ch) await SNAP.put(pid, sid, list);
+    }
+    /* versions made on another device */
+    const add = {};
+    for (const [k, h] of inFolder) { const sid = k.split("/")[0]; if (!live.has(sid)) continue; try { const s = parseSnapFile(await (await h.getFile()).text()); if (s) (add[sid] = add[sid] || []).push(s); } catch { } }
+    for (const [sid, arr] of Object.entries(add)) { const list = lists[sid].concat(arr.map(({ scene, ...s }) => s)).sort((a, b) => a.at - b.at); await SNAP.put(pid, sid, list); }
+    if (Object.keys(add).length && S.p && S.p.id === pid && S.mode === "write") { const box = $("#iSnaps"); const n = S.sel && findNode(S.sel)?.n; if (box && n && add[n.id]) mountSnaps(box, n); }
+  },
+});
+async function backupSnaps(pid, doc) { const out = {}; for (const n of textNodes(doc.binder)) { const l = await SNAP.list(pid, n.id); if (l.length) out[n.id] = l.map(({ up, ...s }) => s); } return out; }
+async function restoreSnaps(pid, snaps) { for (const [sid, l] of Object.entries(snaps || {})) await SNAP.put(pid, sid, l.map(s => Object.assign({}, s, { up: false }))); }
+
+/* diff: paragraphs first, then words inside changed paragraphs */
+function lcsOps(a, b) {
+  let s = 0; while (s < a.length && s < b.length && a[s] === b[s]) s++;
+  let e = 0; while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+  const A = a.slice(s, a.length - e), B = b.slice(s, b.length - e), ops = [];
+  for (let i = 0; i < s; i++) ops.push(["=", a[i]]);
+  if (A.length * B.length > 4e6) { A.forEach(x => ops.push(["-", x])); B.forEach(x => ops.push(["+", x])); }
+  else {
+    const n = A.length, m = B.length, T = new Uint32Array((n + 1) * (m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) T[i * (m + 1) + j] = A[i] === B[j] ? T[(i + 1) * (m + 1) + j + 1] + 1 : Math.max(T[(i + 1) * (m + 1) + j], T[i * (m + 1) + j + 1]);
+    let i = 0, j = 0;
+    while (i < n && j < m) { if (A[i] === B[j]) { ops.push(["=", A[i]]); i++; j++; } else if (T[(i + 1) * (m + 1) + j] >= T[i * (m + 1) + j + 1]) ops.push(["-", A[i++]]); else ops.push(["+", B[j++]]); }
+    while (i < n) ops.push(["-", A[i++]]); while (j < m) ops.push(["+", B[j++]]);
+  }
+  for (let i = a.length - e; i < a.length; i++) ops.push(["=", a[i]]);
+  return ops;
+}
+const htmlParas = html => { const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html"); return [...d.body.firstChild.childNodes].map(x => (x.textContent || "").replace(/\s+/g, " ").trim()).filter(Boolean); };
+function diffHtml(oldHtml, newHtml, onlyChanges) {
+  const ops = lcsOps(htmlParas(oldHtml), htmlParas(newHtml)), out = []; let same = 0, adds = 0, dels = 0;
+  const flushSame = run => { if (!run.length) return; if (onlyChanges && run.length > 2) { out.push(`<p class="dsame">${esc(run[0])}</p><p class="dskip">${esc(tl("… nezmenené odseky: {x} …").replace("{x}", run.length - 2))}</p><p class="dsame">${esc(run[run.length - 1])}</p>`); } else run.forEach(t => out.push(`<p class="dsame">${esc(t)}</p>`)); };
+  let run = [];
+  for (let i = 0; i < ops.length; i++) {
+    const [t, v] = ops[i];
+    if (t === "=") { run.push(v); same++; continue; }
+    flushSame(run); run = [];
+    /* collect a block of removals and additions, pair them up for a word diff */
+    const del = [], ins = [];
+    while (i < ops.length && ops[i][0] !== "=") { (ops[i][0] === "-" ? del : ins).push(ops[i][1]); i++; } i--;
+    const k = Math.min(del.length, ins.length);
+    for (let j = 0; j < k; j++) {
+      const wa = del[j].split(/(\s+)/), wb = ins[j].split(/(\s+)/), wo = lcsOps(wa, wb), common = wo.filter(o => o[0] === "=" && o[1].trim()).length;
+      if (common < Math.max(wa.length, wb.length) / 2 * .3) { out.push(`<p class="ddel">${esc(del[j])}</p><p class="dins">${esc(ins[j])}</p>`); dels++; adds++; continue; }
+      let h = ""; wo.forEach(([o, w]) => { h += o === "=" ? esc(w) : o === "-" ? `<del>${esc(w)}</del>` : `<ins>${esc(w)}</ins>`; });
+      out.push(`<p class="dmix">${h}</p>`); dels++; adds++;
+    }
+    del.slice(k).forEach(x => { out.push(`<p class="ddel">${esc(x)}</p>`); dels++; });
+    ins.slice(k).forEach(x => { out.push(`<p class="dins">${esc(x)}</p>`); adds++; });
+  }
+  flushSame(run);
+  return { html: out.join(""), changed: adds + dels };
+}
+async function mountSnaps(el, n) {
+  if (!el || !S.p) return;
+  const sid = n.id, list = (await SNAP.list(S.p.id, sid)).slice().reverse(), cur = n.words || 0;
+  if (!el.isConnected) return;
+  el.innerHTML = `<span class="lbl">Verzie scény ${list.length ? `<span class="mono">${list.length}</span>` : ""}</span>
+    <div class="addrel" style="grid-template-columns:minmax(0,1fr) auto"><input class="inp" id="snLabel" placeholder="Názov, napr. pred prepisom" autocomplete="off"><button class="btn sm" id="snAdd">${I.hist}Uložiť verziu</button></div>
+    ${list.length ? `<div class="snaps">${list.slice(0, el.dataset.all ? 999 : 6).map(s => { const d = cur - (s.words || 0); return `<div class="snap${s.auto ? " auto" : ""}"><div class="sn-t"><b>${esc(s.label || (s.auto ? tl("automatická") : tl("Verzia")))}</b><small class="hint">${fmtWhen(s.at)} · ${nf(s.words)} ${plural(s.words, "slovo", "slová", "slov")}${d ? ` (${d > 0 ? "teraz +" : "teraz −"}${nf(Math.abs(d))})` : ""}</small></div><div class="sn-b"><button class="btn sm ghost" data-sncmp="${s.id}">Porovnať</button><button class="btn icon ghost" data-sndel="${s.id}" title="Zmazať verziu" aria-label="Zmazať verziu">×</button></div></div>`; }).join("")}</div>${list.length > 6 && !el.dataset.all ? `<button class="btn sm ghost" id="snAll">Zobraziť všetky (${list.length})</button>` : ""}`
+      : `<span class="hint">Pred veľkým prepisovaním si ulož verziu. Neskôr ju porovnáš s aktuálnym textom alebo obnovíš.</span>`}`;
+  const add = async () => { flushEditor(); const s = await SNAP.add(sid, $("#snLabel", el).value.trim(), false); if (s) toast(tl("Verzia uložená.")); mountSnaps(el, n); };
+  $("#snAdd", el).onclick = add; $("#snLabel", el).onkeydown = ev => { if (ev.key === "Enter") add(); };
+  $("#snAll", el)?.addEventListener("click", () => { el.dataset.all = "1"; mountSnaps(el, n); });
+  $$("[data-sndel]", el).forEach(b => b.onclick = async () => { if (b.dataset.sure) { await SNAP.del(sid, b.dataset.sndel); mountSnaps(el, n); } else { b.dataset.sure = "1"; b.textContent = tl("Zmazať?"); b.classList.add("danger"); setTimeout(() => { if (b.isConnected) { delete b.dataset.sure; b.textContent = "×"; b.classList.remove("danger"); } }, 3000); } });
+  $$("[data-sncmp]", el).forEach(b => b.onclick = () => { const s = list.find(x => x.id === b.dataset.sncmp); if (s) openSnapDiff(n, s, () => mountSnaps(el, n)); });
+}
+function openSnapDiff(n, s, after) {
+  flushEditor();
+  let only = true, conf = false;
+  const M = modal(`<div class="dhead"><div><b>${esc(s.label || (s.auto ? tl("automatická") : tl("Verzia")))}</b> <span class="hint">${fmtWhen(s.at)}</span><div class="dleg"><span class="lg-del">Bolo vo verzii</span><span class="lg-ins">Je teraz</span></div></div><span class="spacer"></span><button class="btn icon ghost" data-close aria-label="Zavrieť">×</button></div>
+    <div class="dtools"><label class="chk"><input type="checkbox" id="dOnly" checked> Len zmeny</label><span class="spacer"></span><span id="dRest"></span></div>
+    <div class="dbody page" id="dBody"></div>`, "wide");
+  const draw = () => {
+    const r = diffHtml(s.html, S.items[n.id]?.html || "", only);
+    $("#dBody", M.el).innerHTML = r.changed ? r.html : `<p class="empty">${esc(tl("Text je rovnaký ako v tejto verzii."))}</p>`;
+    $("#dRest", M.el).innerHTML = conf ? `<span class="hint">Aktuálny text sa najprv uloží ako verzia.</span><button class="btn sm danger solid" id="dYes">Obnoviť</button><button class="btn sm" id="dNo">Zrušiť</button>` : `<button class="btn sm" id="dAsk">${I.hist}Obnoviť túto verziu</button>`;
+    $("#dAsk", M.el)?.addEventListener("click", () => { conf = true; draw(); });
+    $("#dNo", M.el)?.addEventListener("click", () => { conf = false; draw(); });
+    $("#dYes", M.el)?.addEventListener("click", async () => {
+      await SNAP.add(n.id, tl("Pred obnovením verzie"), true);
+      const it = S.items[n.id] || (S.items[n.id] = { id: n.id, html: "", notes: "" });
+      it.html = s.html; delete it._ph; n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html);
+      saveItem(n.id); saveProject(); M.close(); toast(tl("Verzia obnovená."));
+      if (S.mode === "write" && S.sel === n.id) { renderCenter(); renderInspector(); renderBinder(); } else after && after();
+    });
+  };
+  $("#dOnly", M.el).onchange = ev => { only = ev.target.checked; draw(); };
+  draw();
+}
+
+/* ---------- 2. repetitions close to each other ---------- */
+const REP_STOP = new Set(("a i v vo na sa si je to že z zo s so k ku o do po za pre pri od ale aj by ho mu mi ma ti ťa jej ich im ju nie už len tak no čo ja ty on ona ono my vy oni ony sme ste som sú ten tá tie tí toho tom tým tú jeho jemu ňom ňu ním nej nich nám vám nás vás sa seba sebe ešte tu tam "
+  + "the an and or but of to in on at for with he she it they we you his her its their him them is be as that this by from me my your our not so if no yes").split(/\s+/));
+const REP = { on: (() => { try { return localStorage.getItem("kronikar:rep") === "1"; } catch { return false; } })(), win: (() => { try { return +localStorage.getItem("kronikar:repwin") || 40; } catch { return 40; } })() };
+const repKey = w => { w = w.toLocaleLowerCase(); return w.length <= 3 ? w : w.slice(0, Math.min(w.length - 1, 5)); };
+function repNames() { const s = new Set(); Object.values(S.ents).forEach(e => entTerms(e).forEach(t => t.split(/\s+/).forEach(x => s.add(x)))); return s; }
+function repScan(ed) {
+  if (!hasHL()) return -1;
+  CSS.highlights.delete("kr-rep");
+  if (!REP.on || !ed) return 0;
+  const toks = [], names = repNames(), w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT); let node;
+  while ((node = w.nextNode())) { const re = /[\p{L}][\p{L}'’-]*/gu; let m; while ((m = re.exec(node.data))) toks.push({ node, s: m.index, e: m.index + m[0].length, w: m[0] }); }
+  const last = new Map(), flag = new Set();
+  toks.forEach((t, i) => { const lw = t.w.toLocaleLowerCase(); if (REP_STOP.has(lw) || t.w.length < 2 || names.has(norm(t.w))) return; const k = repKey(t.w), p = last.get(k); if (p !== undefined && i - p <= REP.win) { flag.add(p); flag.add(i); } last.set(k, i); });
+  const ranges = [...flag].map(i => { const t = toks[i], r = new Range(); r.setStart(t.node, t.s); r.setEnd(t.node, t.e); return r; });
+  if (ranges.length) CSS.highlights.set("kr-rep", new Highlight(...ranges));
+  return flag.size;
+}
+
+/* ---------- 3. reading aloud ---------- */
+const TTS = {
+  state: "idle", chunks: [], idx: 0, gen: 0, rate: (() => { try { return +localStorage.getItem("kronikar:ttsrate") || 1; } catch { return 1; } })(), voice: null, ed: null, ready: null,
+  lang: () => bookLang() === "en" ? "en-GB" : "sk-SK",
+  supported() { return !!(window.AndroidTTS || window.speechSynthesis); },
+  init() {
+    if (this.ready) return this.ready;
+    if (window.AndroidTTS) return (this.ready = new Promise(res => { this._init = res; try { AndroidTTS.init(); } catch { res(false); } setTimeout(() => res(false), 8000); }));
+    return (this.ready = new Promise(res => { const v = speechSynthesis.getVoices(); if (v.length) return res(true); speechSynthesis.onvoiceschanged = () => res(true); setTimeout(() => res(true), 1500); }));
+  },
+  voices() { if (!window.speechSynthesis) return []; const l = this.lang().slice(0, 2); return speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith(l)); },
+  build(ed) {
+    const chunks = [];
+    [...ed.children].forEach(block => {
+      const nodes = [], w = document.createTreeWalker(block, NodeFilter.SHOW_TEXT); let x, text = "";
+      while ((x = w.nextNode())) { nodes.push({ node: x, from: text.length }); text += x.data; }
+      if (!text.trim() || block.classList.contains("sb")) return;
+      const at = off => { for (let i = nodes.length - 1; i >= 0; i--) if (off >= nodes[i].from) return [nodes[i].node, Math.min(off - nodes[i].from, nodes[i].node.data.length)]; return [nodes[0].node, 0]; };
+      const re = /[^.!?…]+(?:[.!?…]+["“”»«'’)\]]*|$)/g; let m;
+      while ((m = re.exec(text))) {
+        const raw = m[0]; if (!raw.trim()) continue;
+        const s = m.index + (raw.length - raw.trimStart().length), e = m.index + raw.trimEnd().length;
+        const r = new Range(); const [sn, so] = at(s), [en, eo] = at(e); try { r.setStart(sn, so); r.setEnd(en, eo); } catch { continue; }
+        chunks.push({ text: raw.trim(), range: r, block });
+      }
+    });
+    return chunks;
+  },
+  async start(ed) {
+    if (!this.supported()) { toast(tl("Toto zariadenie nevie čítať nahlas.")); return; }
+    this.stop(true);
+    this.ed = ed; this.chunks = this.build(ed);
+    if (!this.chunks.length) { toast(tl("Scéna je prázdna.")); return; }
+    /* start at the paragraph with the cursor */
+    let from = 0; const sel = getSelection();
+    if (sel.rangeCount && ed.contains(sel.anchorNode)) { let b = sel.anchorNode; while (b && b.parentNode !== ed) b = b.parentNode; const i = this.chunks.findIndex(c => c.block === b); if (i > 0) from = i; }
+    this.state = "play"; renderTtsBar();
+    const ok = await this.init();
+    if (this.state !== "play") return;
+    if (window.AndroidTTS) {
+      if (!ok) { toast(tl("Hlasový výstup sa nepodarilo spustiť.")); return this.stop(); }
+      const st = AndroidTTS.langOk(this.lang());
+      if (st < 0 && st !== -9) { const M = modal(`<h3 style="margin:0">${esc(tl("Chýba hlas pre jazyk knihy"))}</h3><p class="hint" style="margin:0">${esc(tl("Telefón nemá nainštalovaný hlas pre tento jazyk, preto číta iným. Doinštaluješ ho v nastaveniach prevodu textu na reč (napríklad Hlasové služby Google › Nainštalovať hlasové údaje)."))}</p><div class="btnrow"><button class="btn primary" id="ttsSet">${esc(tl("Otvoriť nastavenia hlasu"))}</button><button class="btn" data-close>${esc(tl("Zavrieť"))}</button></div>`, "narrow"); $("#ttsSet", M.el).onclick = () => { try { AndroidTTS.openSettings(); } catch { } M.close(); }; }
+    } else if (!this.voices().length) toast(tl("Na tomto zariadení nie je hlas pre jazyk knihy – číta sa iným hlasom. V Edge sú slovenské hlasy dostupné hneď."));
+    this.play(from);
+  },
+  play(from) {
+    const g = ++this.gen; this.idx = from; this.state = "play"; renderTtsBar();
+    if (window.AndroidTTS) { AndroidTTS.stop(); this.chunks.slice(from).forEach((c, k) => AndroidTTS.speak(c.text, this.lang(), this.rate, g + ":" + (from + k), k === 0)); }
+    else {
+      speechSynthesis.cancel();
+      const vs = this.voices(), v = vs.find(x => x.name === this.voice) || vs.find(x => /natural|online/i.test(x.name)) || vs[0] || null;
+      this.chunks.slice(from).forEach((c, k) => { const u = new SpeechSynthesisUtterance(c.text); u.lang = this.lang(); u.rate = this.rate; if (v) u.voice = v; u.onstart = () => this.ev("start", g, from + k); u.onend = () => this.ev("done", g, from + k); u.onerror = ev => { if (ev.error !== "interrupted" && ev.error !== "canceled") this.ev("done", g, from + k); }; speechSynthesis.speak(u); });
+    }
+  },
+  ev(type, g, i) {
+    if (g !== this.gen || this.state !== "play") return;
+    if (type === "start") { this.idx = i; const c = this.chunks[i]; if (c && hasHL()) { CSS.highlights.set("kr-tts", new Highlight(c.range)); const r = c.range.getBoundingClientRect(), sc = this.ed?.closest(".edscroll"); if (sc && r.height) { const b = sc.getBoundingClientRect(); if (r.top < b.top + 40 || r.bottom > b.bottom - 60) sc.scrollBy({ top: r.top - b.top - b.height / 3, behavior: "smooth" }); } } }
+    else if (type === "done" && i >= this.chunks.length - 1) this.stop();
+  },
+  pause() { if (this.state !== "play") return; this.gen++; this.state = "paused"; if (window.AndroidTTS) AndroidTTS.stop(); else speechSynthesis.cancel(); renderTtsBar(); },
+  resume() { if (this.state === "paused") this.play(this.idx); },
+  stop(quiet) { if (this.state === "idle" && quiet) return; this.gen++; this.state = "idle"; try { if (window.AndroidTTS) AndroidTTS.stop(); else if (window.speechSynthesis) speechSynthesis.cancel(); } catch { } if (hasHL()) CSS.highlights.delete("kr-tts"); renderTtsBar(); },
+  setRate(r) { this.rate = r; try { localStorage.setItem("kronikar:ttsrate", r); } catch { } if (this.state === "play") this.play(this.idx); },
+};
+window.__tts = (type, id) => {
+  if (type === "ready" || type === "fail") { TTS._init && TTS._init(type === "ready"); return; }
+  const [g, i] = String(id).split(":").map(Number); TTS.ev(type === "error" ? "done" : type, g, i);
+};
+function renderTtsBar() {
+  const bar = $("#ttsBar"); if (!bar) return;
+  const st = TTS.state; bar.hidden = st === "idle";
+  if (st === "idle") { bar.innerHTML = ""; $("#ttsBtn")?.setAttribute("aria-pressed", "false"); return; }
+  $("#ttsBtn")?.setAttribute("aria-pressed", "true");
+  const vs = TTS.voices();
+  bar.innerHTML = `${st === "play" ? `<button class="btn icon" data-tts="pause" title="Pozastaviť" aria-label="Pozastaviť">${I.pause}</button>` : `<button class="btn icon primary" data-tts="resume" title="Pokračovať" aria-label="Pokračovať">${I.play}</button>`}<button class="btn icon" data-tts="stop" title="Zastaviť" aria-label="Zastaviť">${I.stop}</button>
+    <span class="hint">${st === "play" ? "Čítam nahlas…" : "Pozastavené"}</span><span class="spacer"></span>
+    <label class="tts-l"><span>Rýchlosť</span><select class="inp" data-tts="rate">${[.75, .9, 1, 1.15, 1.3, 1.5].map(r => `<option value="${r}"${TTS.rate === r ? " selected" : ""}>${String(r).replace(".", LANG === "en" ? "." : ",")}×</option>`).join("")}</select></label>
+    ${!window.AndroidTTS && vs.length > 1 ? `<label class="tts-l"><span>Hlas</span><select class="inp" data-tts="voice">${vs.map(v => `<option${v.name === TTS.voice ? " selected" : ""}>${esc(v.name)}</option>`).join("")}</select></label>` : ""}`;
+  $$("[data-tts]", bar).forEach(b => { const a = b.dataset.tts; if (b.tagName === "SELECT") b.onchange = () => { if (a === "rate") TTS.setRate(+b.value); else { TTS.voice = b.value; if (TTS.state === "play") TTS.play(TTS.idx); } }; else b.onclick = () => a === "pause" ? TTS.pause() : a === "resume" ? TTS.resume() : TTS.stop(); });
+}
+
+/* ---------- 4. writing sprint ---------- */
+const SPRINT = { on: false, end: 0, min: 0, start: 0, words0: 0, left: 0, paused: false, goal: 0, timer: null, pid: null };
+function sprintWords() { return S.p && S.p.id === SPRINT.pid ? totalWords() - SPRINT.words0 : 0; }
+function sprintStart(min, goal) {
+  if (!S.p) return;
+  flushEditor();
+  Object.assign(SPRINT, { on: true, min, start: Date.now(), end: Date.now() + min * 60000, words0: totalWords(), paused: false, goal: goal || 0, pid: S.p.id, left: 0 });
+  clearInterval(SPRINT.timer); SPRINT.timer = setInterval(sprintTick, 1000); sprintTick();
+  $("#ed")?.focus();
+}
+function sprintTick() {
+  if (!SPRINT.on) return;
+  const left = SPRINT.paused ? SPRINT.left : SPRINT.end - Date.now();
+  if (left <= 0) return sprintFinish(true);
+  let pill = $("#sprintPill");
+  if (!pill) { pill = document.createElement("div"); pill.id = "sprintPill"; pill.className = "sprintpill"; document.body.appendChild(pill); }
+  const mm = Math.floor(left / 60000), ss = Math.floor(left % 60000 / 1000), w = Math.max(0, sprintWords());
+  const pct = SPRINT.goal ? Math.min(100, w / SPRINT.goal * 100) : 100 - left / (SPRINT.min * 600);
+  pill.innerHTML = `<span class="sp-ring" style="--p:${pct.toFixed(1)}"></span><b class="mono">${mm}:${String(ss).padStart(2, "0")}</b><span class="mono">${nf(w)}${SPRINT.goal ? " / " + nf(SPRINT.goal) : ""} ${tl("sl.")}</span>
+    <button class="btn icon ghost" data-sp="${SPRINT.paused ? "go" : "pause"}" title="${SPRINT.paused ? tl("Pokračovať") : tl("Pozastaviť")}">${SPRINT.paused ? I.play : I.pause}</button><button class="btn icon ghost" data-sp="stop" title="${tl("Ukončiť šprint")}">${I.stop}</button>`;
+  pill.classList.toggle("paused", SPRINT.paused);
+  $$("[data-sp]", pill).forEach(b => b.onclick = () => { const a = b.dataset.sp; if (a === "pause") { SPRINT.left = SPRINT.end - Date.now(); SPRINT.paused = true; } else if (a === "go") { SPRINT.end = Date.now() + SPRINT.left; SPRINT.paused = false; } else sprintFinish(false); sprintTick(); });
+}
+function chime() { try { const A = new (window.AudioContext || window.webkitAudioContext)(); [0, .18, .36].forEach((t, i) => { const o = A.createOscillator(), g = A.createGain(); o.frequency.value = [660, 880, 1046][i]; o.connect(g); g.connect(A.destination); g.gain.setValueAtTime(.0001, A.currentTime + t); g.gain.exponentialRampToValueAtTime(.25, A.currentTime + t + .02); g.gain.exponentialRampToValueAtTime(.0001, A.currentTime + t + .5); o.start(A.currentTime + t); o.stop(A.currentTime + t + .55); }); setTimeout(() => A.close(), 1500); } catch { } }
+function sprintFinish(done) {
+  if (!SPRINT.on) return;
+  flushEditor();
+  clearInterval(SPRINT.timer); SPRINT.on = false; $("#sprintPill")?.remove();
+  const spent = done ? SPRINT.min : Math.round(((SPRINT.paused ? SPRINT.min * 60000 - SPRINT.left : Date.now() - SPRINT.start)) / 6000) / 10;
+  const w = Math.max(0, sprintWords()), p = S.p && S.p.id === SPRINT.pid ? S.p : null;
+  if (!p || spent < .5) return;
+  const rec = { at: Date.now(), min: spent, words: w, goal: SPRINT.goal || undefined };
+  p.sprints = (p.sprints || []).concat([rec]).slice(-300); saveProject();
+  if (done) chime();
+  const best = Math.max(...p.sprints.map(s => s.words / Math.max(1, s.min)));
+  const wpm = w / Math.max(1, spent);
+  modal(`<div class="sprint-done"><div class="sd-big">${I.timer}</div><h3>${done ? tl("Šprint skončil") : tl("Šprint ukončený")}</h3>
+    <div class="statrow"><div class="stat"><b>${nf(w)}</b><span>slov</span></div><div class="stat"><b>${String(spent).replace(".", LANG === "en" ? "." : ",")}</b><span>minút</span></div><div class="stat"><b>${Math.round(wpm)}</b><span>slov za minútu</span></div></div>
+    ${SPRINT.goal ? `<p>${w >= SPRINT.goal ? tl("Cieľ šprintu splnený!") : tl("Do cieľa chýbalo {x} slov.").replace("{x}", nf(SPRINT.goal - w))}</p>` : ""}
+    ${wpm >= best && p.sprints.length > 1 ? `<p class="hint">${tl("Tvoje najrýchlejšie písanie doteraz.")}</p>` : ""}
+    <div class="btnrow" style="justify-content:center"><button class="btn primary" data-close>Hotovo</button><button class="btn" id="sdAgain">${I.timer}Ďalší šprint</button></div></div>`, "narrow");
+  $("#sdAgain")?.addEventListener("click", () => { document.querySelector(".kmodal")?.remove(); sprintStart(SPRINT.min, SPRINT.goal); });
+}
+function openSprintMenu(anchor) {
+  if (SPRINT.on) return;
+  const last = (() => { try { return JSON.parse(localStorage.getItem("kronikar:sprint") || "{}"); } catch { return {}; } })();
+  const M = modal(`<h3 style="margin:0 0 4px">Písací šprint</h3><p class="hint" style="margin:0 0 12px">Píš bez prestávky, kým nevyprší čas. Kronikár počíta nové slová a uloží ich do štatistík v časti Projekt.</p>
+    <div class="field"><span>Dĺžka</span><div class="chips">${[10, 15, 20, 25, 30, 45].map(m => `<button class="chip link${(last.min || 20) === m ? " on" : ""}" data-spm="${m}">${m} min</button>`).join("")}</div></div>
+    <label class="field"><span>Cieľ slov (voliteľné)</span><input class="inp mono" id="spGoal" type="number" min="0" step="50" value="${last.goal || ""}" placeholder="napr. 500"></label>
+    <div class="btnrow"><button class="btn primary" id="spGo">${I.timer}Začať</button><button class="btn" data-close>Zrušiť</button></div>`, "narrow");
+  let min = last.min || 20;
+  $$("[data-spm]", M.el).forEach(b => b.onclick = () => { min = +b.dataset.spm; $$("[data-spm]", M.el).forEach(x => x.classList.toggle("on", x === b)); });
+  $("#spGo", M.el).onclick = () => { const goal = +$("#spGoal", M.el).value || 0; try { localStorage.setItem("kronikar:sprint", JSON.stringify({ min, goal })); } catch { } M.close(); sprintStart(min, goal); };
+}
+
+/* ---------- editor extras: toolbar buttons and live updates ---------- */
+function edExtras(c, ed, n) {
+  const box = $("#edTools", c); if (!box) return;
+  box.innerHTML = `<button class="btn sm ghost" id="repBtn" aria-pressed="${REP.on}" title="Zvýrazniť slová opakované blízko seba">${I.rep}<span>Opakovania</span><b class="mono" id="repN"></b></button>
+    <select class="inp repwin" id="repWin" title="Ako blízko pri sebe" ${REP.on ? "" : "hidden"}>${[20, 40, 80, 150].map(w => `<option value="${w}"${REP.win === w ? " selected" : ""}>${tl("do {x} slov").replace("{x}", w)}</option>`).join("")}</select>
+    ${TTS.supported() ? `<button class="btn icon ghost" id="ttsBtn" aria-pressed="false" title="Čítať nahlas od kurzora">${I.speak}</button>` : ""}
+    <button class="btn icon ghost" id="sprintBtn" title="Písací šprint">${I.timer}</button>`;
+  const upd = () => { const k = repScan(ed), b = $("#repN", c); if (b) b.textContent = REP.on && k > 0 ? k : ""; if (REP.on && k < 0) toast(tl("Tento prehliadač nevie zvýrazňovať opakovania.")); };
+  $("#repBtn", c).onclick = () => { REP.on = !REP.on; try { localStorage.setItem("kronikar:rep", REP.on ? "1" : "0"); } catch { } $("#repBtn", c).setAttribute("aria-pressed", REP.on); $("#repWin", c).hidden = !REP.on; upd(); };
+  $("#repWin", c).onchange = ev => { REP.win = +ev.target.value; try { localStorage.setItem("kronikar:repwin", REP.win); } catch { } upd(); };
+  $("#ttsBtn", c)?.addEventListener("click", () => TTS.state === "idle" ? TTS.start(ed) : TTS.stop());
+  $("#sprintBtn", c).onclick = () => openSprintMenu();
+  const later = debounce(upd, 500);
+  ed.addEventListener("input", () => { if (REP.on) later(); if (TTS.state !== "idle") TTS.stop(); });
+  if (REP.on) setTimeout(upd, 50);
+  renderTtsBar();
+}
+
+/* ---------- 5. tools page in the manuscript: find & replace, names, plot ---------- */
+function openTools(tab) { flushEditor(); S.tool = tab || S.tool || "replace"; S.mobBinder = false; wsClass(); $$("#binder .bnode").forEach(r => r.classList.remove("sel")); renderCenter(); renderInspector(); }
+function renderTools(c) {
+  const tabs = [["replace", "Nájsť a nahradiť"], ["names", "Mená mimo sveta"], ["plot", "Štruktúra deja"], ["threads", "Nitky deja"], ["secrets", "Kto čo vie"], ["tempo", "Tempo"]];
+  c.innerHTML = `<div class="edbar"><button class="btn icon ghost mobonly backbtn" id="mobBinderBtn" title="Rukopis">${I.back}</button>
+      <div class="segs">${tabs.map(([k, l]) => `<button class="seg${S.tool === k ? " on" : ""}" data-tt="${k}">${l}</button>`).join("")}</div><span class="spacer"></span>
+      <button class="btn icon ghost" id="toolsClose" title="Zavrieť" aria-label="Zavrieť">×</button></div>
+    <div class="edscroll"><div class="toolpage" id="toolPage"></div></div>`;
+  $("#mobBinderBtn").onclick = () => { S.mobBinder = true; wsClass(); };
+  $("#toolsClose").onclick = () => { S.tool = null; if (!S.sel) S.sel = allTexts()[0]?.id || null; renderCenter(); renderInspector(); renderBinder(); };
+  $$("[data-tt]", c).forEach(b => b.onclick = () => { S.tool = b.dataset.tt; renderTools(c); });
+  const pg = $("#toolPage", c);
+  if (S.tool === "names") renderNamesTool(pg); else if (S.tool === "plot") renderPlotTool(pg); else if (S.tool === "threads") renderThreadsTool(pg); else if (S.tool === "secrets") renderSecretsTool(pg); else if (S.tool === "tempo") renderTempoTool(pg); else renderReplaceTool(pg);
+}
+
+/* find & replace engine */
+function findRe(pairs, { whole = true, cs = false } = {}) {
+  const fs = pairs.map(p => p[0]).filter(x => x && x.trim()); if (!fs.length) return null;
+  const alt = [...new Set(fs)].sort((a, b) => b.length - a.length).map(f => reEsc(f).replace(/\s+/g, "\\s+")).join("|");
+  return new RegExp((whole ? "(?<![\\p{L}\\p{N}])(?:" : "(?:") + alt + (whole ? ")(?![\\p{L}\\p{N}])" : ")"), "gu" + (cs ? "" : "i"));
+}
+function repFor(pairs, m, cs) {
+  const key = cs ? m : m.toLocaleLowerCase(), p = pairs.find(x => (cs ? x[0] : x[0].toLocaleLowerCase()).replace(/\s+/g, " ") === key.replace(/\s+/g, " "));
+  let r = p ? p[1] : m;
+  if (!cs && r) { const up = m === m.toLocaleUpperCase() && m !== m.toLocaleLowerCase() && m.length > 1, cap = m[0] !== m[0].toLocaleLowerCase(); if (up) r = r.toLocaleUpperCase(); else if (cap) r = r[0].toLocaleUpperCase() + r.slice(1); }
+  return r;
+}
+function replaceInHtml(html, re, pairs, cs) {
+  const d = new DOMParser().parseFromString("<div>" + (html || "") + "</div>", "text/html"), root = d.body.firstChild, w = d.createTreeWalker(root, NodeFilter.SHOW_TEXT); let x, n = 0;
+  while ((x = w.nextNode())) { re.lastIndex = 0; if (!re.test(x.data)) continue; re.lastIndex = 0; x.data = x.data.replace(re, m => { n++; return repFor(pairs, m, cs); }); }
+  return { html: root.innerHTML, n };
+}
+function findHits(pairs, opt) {
+  const re = findRe(pairs, opt); if (!re) return [];
+  const out = [];
+  const ctx = (txt, m) => { const a = Math.max(0, m.index - 45), b = Math.min(txt.length, m.index + m[0].length + 45); return (a ? "…" : "") + esc(txt.slice(a, m.index)) + "<mark>" + esc(m[0]) + "</mark>" + esc(txt.slice(m.index + m[0].length, b)) + (b < txt.length ? "…" : ""); };
+  const scan = (txt, list) => { re.lastIndex = 0; let m, k = 0; while ((m = re.exec(txt))) { k++; if (list.length < 4) list.push(ctx(txt, m)); } return k; };
+  walk(S.p.binder, n => {
+    const r = { n, text: 0, meta: 0, snips: [] };
+    if (n.type === "text") { const it = S.items[n.id]; r.text = scan(htmlToText(it?.html || "").replace(/\n+/g, " ¶ "), r.snips); if (opt.meta) r.meta = scan(it?.notes || "", r.snips); }
+    if (opt.meta) r.meta += scan(n.title || "", r.snips) + scan(n.synopsis || "", r.snips);
+    if (r.text + r.meta) out.push(r);
+  });
+  return out;
+}
+async function replaceAll(pairs, opt, only) {
+  const re = findRe(pairs, opt); if (!re) return 0;
+  flushEditor();
+  let total = 0; const label = tl("Pred nahradením „{x}“").replace("{x}", pairs.map(p => p[0]).slice(0, 3).join(", ") + (pairs.length > 3 ? "…" : ""));
+  const nodes = []; walk(S.p.binder, n => { if (!only || only.has(n.id)) nodes.push(n); });
+  for (const n of nodes) {
+    if (n.type === "text") {
+      const it = S.items[n.id];
+      if (it && it.html) { re.lastIndex = 0; if (re.test(htmlToText(it.html))) { const r = replaceInHtml(it.html, re, pairs, opt.cs); if (r.n) { await SNAP.add(n.id, label, true); it.html = r.html; n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html); total += r.n; saveItem(n.id); } } }
+      if (opt.meta && it && it.notes) { re.lastIndex = 0; const nn = it.notes.replace(re, m => { total++; return repFor(pairs, m, opt.cs); }); if (nn !== it.notes) { it.notes = nn; saveItem(n.id); } }
+    }
+    if (opt.meta) ["title", "synopsis"].forEach(k => { if (n[k]) { re.lastIndex = 0; n[k] = n[k].replace(re, m => { total++; return repFor(pairs, m, opt.cs); }); } });
+  }
+  saveProject();
+  return total;
+}
+/* forms of a new name derived from the forms of the old one (Ilsa → Isla: Ilsou → Islou) */
+function deriveForm(oldName, form, newName) {
+  let k = 0; while (k < oldName.length && k < form.length && oldName[k] === form[k]) k++;
+  const oldEnd = oldName.slice(k), formEnd = form.slice(k);
+  if (oldEnd && !newName.endsWith(oldEnd)) return "";
+  return newName.slice(0, newName.length - oldEnd.length) + formEnd;
+}
+/* rows of a rename: the name, its single words (Ilsa Vranová → Ilsa) and all forms, each with a suggested new form */
+function renameRows(e, newName) {
+  const ow = (e.name || "").trim().split(/\s+/), nw = newName.trim().split(/\s+/), same = ow.length === nw.length && newName.trim();
+  const mapTok = tok => {
+    if (!same) return "";
+    const i = ow.indexOf(tok); if (i >= 0) return nw[i];
+    let best = -1, bl = 2; ow.forEach((w, k) => { let c = 0; while (c < w.length && c < tok.length && w[c] === tok[c]) c++; if (c > bl) { bl = c; best = k; } });
+    return best >= 0 ? deriveForm(ow[best], tok, nw[best]) : tok;
+  };
+  const rows = [], seen = new Set(), add = (old, sug, kind) => { if (!old || seen.has(old)) return; seen.add(old); rows.push({ old, sug, kind }); };
+  add(e.name, newName.trim(), "name");
+  if (ow.length > 1) ow.forEach((w, i) => { if (w.length > 1 && /^\p{Lu}/u.test(w)) add(w, same ? nw[i] : "", "word"); });
+  (e.forms || []).forEach(f => add(f, f.split(/\s+/).map(mapTok).every(Boolean) ? f.split(/\s+/).map(mapTok).join(" ") : "", "form"));
+  return rows;
+}
+function renderReplaceTool(pg) {
+  const st = S.rep || (S.rep = { mode: "text", find: "", to: "", whole: true, cs: false, meta: true, ent: "", newName: "", forms: {}, world: true });
+  const ents = Object.values(S.ents).filter(e => e.cat !== "mapa").sort((a, b) => (a.name || "").localeCompare(b.name || "", "sk"));
+  const e = S.ents[st.ent];
+  const rows = () => e ? renameRows(e, st.newName).map(r => Object.assign(r, { to: r.kind === "name" ? st.newName.trim() : (st.forms[r.old] ?? r.sug) })) : [];
+  const pairs = () => st.mode === "text" ? (st.find.trim() ? [[st.find, st.to]] : []) : rows().filter(r => r.to && r.to !== r.old).map(r => [r.old, r.to]);
+  const opt = () => ({ whole: st.mode === "text" ? st.whole : true, cs: st.mode === "text" ? st.cs : false, meta: st.meta });
+  pg.innerHTML = `<h2 class="tp-h">Nájsť a nahradiť v celom rukopise</h2>
+    <div class="segs small"><button class="seg${st.mode === "text" ? " on" : ""}" data-rm="text">Text</button><button class="seg${st.mode === "ent" ? " on" : ""}" data-rm="ent">Premenovať zo Sveta</button></div>
+    <div class="card">${st.mode === "text" ? `<div class="fgrid"><label class="field"><span>Nájsť</span><input class="inp" id="rFind" value="${esc(st.find)}" autocomplete="off"></label><label class="field"><span>Nahradiť za</span><input class="inp" id="rTo" value="${esc(st.to)}" autocomplete="off"></label></div>
+      <div class="xopts"><label class="chk"><input type="checkbox" id="rWhole"${st.whole ? " checked" : ""}> Celé slová</label><label class="chk"><input type="checkbox" id="rCs"${st.cs ? " checked" : ""}> Rozlišovať veľké a malé písmená</label><label class="chk"><input type="checkbox" id="rMeta"${st.meta ? " checked" : ""}> Aj v názvoch, synopsách a poznámkach scén</label></div>`
+      : `<div class="fgrid"><label class="field"><span>Záznam zo Sveta</span><select class="inp" id="rEnt"><option value="">Vyber…</option>${CATS.map(c => { const l = ents.filter(x => x.cat === c.id); return l.length ? `<optgroup label="${esc(c.name)}">${l.map(x => `<option value="${x.id}"${x.id === st.ent ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</optgroup>` : ""; }).join("")}</select></label>
+        <label class="field"><span>Nové meno</span><input class="inp" id="rNew" value="${esc(st.newName)}" ${e ? "" : "disabled"} autocomplete="off"></label></div>
+      ${e ? `<div class="formmap"><div class="fm-h"><span>Tvar v texte</span><span></span><span>Nahradí sa za</span></div>${rows().map(r => `<div class="fm-r"><span class="mono">${esc(r.old)}</span><span>→</span><input class="inp" data-fm="${esc(r.old)}" data-kind="${r.kind}" value="${esc(r.to)}" ${r.kind === "name" ? "disabled" : ""} placeholder="${esc(tl("doplň tvar"))}"></div>`).join("")}</div>
+        <span class="hint">Tvary sa doplnia podľa starého mena – skontroluj ich. Tvary, ktoré záznam ešte nemá, pridaj vo Svete (Tvary mena a prezývky).</span>
+        <div class="xopts"><label class="chk"><input type="checkbox" id="rWorld"${st.world ? " checked" : ""}> Zmeniť meno a tvary aj vo Svete</label><label class="chk"><input type="checkbox" id="rMeta"${st.meta ? " checked" : ""}> Aj v názvoch, synopsách a poznámkach scén</label></div>` : `<span class="hint">Vyber postavu, miesto či iný záznam. Kronikár nájde v rukopise meno aj všetky jeho tvary zo Sveta a nahradí ich novými.</span>`}`}
+    </div>
+    <div id="rRes"></div>`;
+  const res = () => {
+    const box = $("#rRes", pg), P = pairs();
+    if (!P.length) { box.innerHTML = ""; return; }
+    const hits = findHits(P, opt()), n = hits.reduce((a, h) => a + h.text + h.meta, 0);
+    box.innerHTML = n ? `<div class="rr-h"><b>${tl("Nájdené: {x}×").replace("{x}", nf(n))}</b> <span class="hint">${tl("v {x} miestach rukopisu").replace("{x}", hits.length)}</span><span class="spacer"></span><button class="btn primary" id="rAll">${tl("Nahradiť všetko")}</button></div>
+      <div class="rhits">${hits.map(h => `<div class="rhit"><div class="rh-t"><button class="lnk" data-rgo="${h.n.id}">${esc(h.n.type === "text" ? sceneTitleFull(h.n) : h.n.title)}</button><span class="mono hint">${h.text + h.meta}×</span><span class="spacer"></span><button class="btn sm ghost" data-rone="${h.n.id}">Nahradiť tu</button></div>${h.snips.map(s => `<div class="rh-s">${s}</div>`).join("")}</div>`).join("")}</div>
+      <p class="hint">Každá zmenená scéna si pred nahradením uloží verziu – v inšpektore scény ju nájdeš a obnovíš.</p>`
+      : `<p class="empty">${esc(tl("Nič sa nenašlo."))}</p>`;
+    const done = async only => { const k = await replaceAll(P, opt(), only); if (st.mode === "ent" && st.world && e && !only) { const nn = st.newName.trim(); if (nn) { const rs = rows(); e.forms = [...new Set(rs.filter(r => r.kind === "form").map(r => r.to || r.old).filter(x => x && x !== nn))]; e.name = nn; saveEnt(e.id); } st.newName = ""; st.forms = {}; } toast(tl("Nahradené: {x}×").replace("{x}", nf(k))); renderBinder(); renderReplaceTool(pg); };
+    $("#rAll", box)?.addEventListener("click", () => done(null));
+    $$("[data-rone]", box).forEach(b => b.onclick = () => done(new Set([b.dataset.rone])));
+    $$("[data-rgo]", box).forEach(b => b.onclick = () => { const f = findNode(b.dataset.rgo); if (f && f.parent) setOpen(f.parent, true); S.tool = null; renderBinder(); select(b.dataset.rgo); });
+  };
+  const later = debounce(res, 250);
+  $$("[data-rm]", pg).forEach(b => b.onclick = () => { st.mode = b.dataset.rm; renderReplaceTool(pg); });
+  $("#rFind", pg)?.addEventListener("input", ev => { st.find = ev.target.value; later(); });
+  $("#rTo", pg)?.addEventListener("input", ev => { st.to = ev.target.value; later(); });
+  $("#rWhole", pg)?.addEventListener("change", ev => { st.whole = ev.target.checked; res(); });
+  $("#rCs", pg)?.addEventListener("change", ev => { st.cs = ev.target.checked; res(); });
+  $("#rMeta", pg)?.addEventListener("change", ev => { st.meta = ev.target.checked; res(); });
+  $("#rWorld", pg)?.addEventListener("change", ev => { st.world = ev.target.checked; });
+  $("#rEnt", pg)?.addEventListener("change", ev => { st.ent = ev.target.value; st.newName = ""; st.forms = {}; renderReplaceTool(pg); setTimeout(() => $("#rNew", pg)?.focus(), 20); });
+  $("#rNew", pg)?.addEventListener("input", ev => { st.newName = ev.target.value; const rs = rows(); $$("[data-fm]", pg).forEach(i => { const r = rs.find(x => x.old === i.dataset.fm); if (r) i.value = r.to; }); later(); });
+  $$("[data-fm]", pg).forEach(i => i.oninput = () => { st.forms[i.dataset.fm] = i.value; later(); });
+  res();
+}
+
+/* names written with a capital letter that the world does not know */
+function damerau(a, b) {
+  const n = a.length, m = b.length; if (Math.abs(n - m) > 2) return 9;
+  const d = Array.from({ length: n + 1 }, (_, i) => [i, ...Array(m).fill(0)]); for (let j = 0; j <= m; j++) d[0][j] = j;
+  for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) { const c = a[i - 1] === b[j - 1] ? 0 : 1; d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c); if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1); }
+  return d[n][m];
+}
+function scanNames() {
+  const known = [], kset = new Set();
+  Object.values(S.ents).forEach(e => [e.name, ...(e.forms || [])].filter(Boolean).forEach(f => f.split(/[\s,]+/).forEach(w => { if (w.length > 1 && /^\p{Lu}/u.test(w)) { const k = norm(w); if (!kset.has(k)) { kset.add(k); known.push({ w, k, e }); } } })));
+  const ign = new Set((S.p.nameIgnore || []).map(norm));
+  const isKnown = k => kset.has(k) || known.some(x => x.k.length >= 4 && k.length >= 4 && (k.startsWith(x.k.slice(0, Math.max(3, x.k.length - 1))) || x.k.startsWith(k.slice(0, Math.max(3, k.length - 1)))));
+  const words = new Map();
+  allTexts().forEach(n => {
+    const d = new DOMParser().parseFromString("<div>" + (S.items[n.id]?.html || "") + "</div>", "text/html");
+    [...d.body.firstChild.childNodes].forEach(b => {
+      const t = (b.textContent || ""); const re = /[\p{L}][\p{L}'’-]*/gu; let m, prevEnd = 0, first = true;
+      while ((m = re.exec(t))) {
+        const w = m[0], preT = t.slice(0, m.index).replace(/\s+$/, ""), stripped = preT.replace(/[„“"«»‚‘'’(\[]+$/, "").replace(/\s+$/, ""), opened = stripped.length !== preT.length;
+        const start = first || stripped === "" || /[.!?…:]["“”»«'’)\]]*$/.test(stripped) || /[–—-]$/.test(stripped) || (opened && /[.!?…:,;]$/.test(stripped));
+        first = false; prevEnd = m.index + w.length;
+        if (!/^\p{Lu}/u.test(w) || w.length < 2 || w === w.toLocaleUpperCase()) continue;
+        const k = norm(w); if (ign.has(k) || isKnown(k)) continue;
+        const r = words.get(w) || { w, k, n: 0, mid: 0, scenes: new Set() };
+        r.n++; if (!start) r.mid++; r.scenes.add(n.id); words.set(w, r);
+      }
+    });
+  });
+  const out = [...words.values()].filter(r => r.mid > 0);
+  out.forEach(r => {
+    let best = null;
+    known.forEach(x => {
+      const dd = damerau(r.k, x.k), lim = r.k.length <= 5 ? 1 : 2;
+      if (dd <= lim && dd > 0 && (!best || dd < best.d)) best = { d: dd, to: x.w, e: x.e };
+      else if (r.k.length > 3 && x.k.length > 3) { const ds = damerau(r.k.slice(0, -1), x.k.slice(0, -1)); if (ds > 0 && ds <= 1 && (!best || ds + .5 < best.d)) best = { d: ds + .5, to: x.w.slice(0, -1) + r.w.slice(-1), e: x.e }; }
+    });
+    r.typo = best;
+  });
+  return out.sort((a, b) => (!!b.typo - !!a.typo) || b.n - a.n || a.w.localeCompare(b.w, "sk"));
+}
+function renderNamesTool(pg) {
+  const list = scanNames(), ign = S.p.nameIgnore || [];
+  const entSel = () => `<option value="">Je to tvar mena…</option>${CATS.map(c => { const l = entsBy(c.id); return l.length ? `<optgroup label="${esc(c.name)}">${l.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</optgroup>` : ""; }).join("")}`;
+  const catSel = w => `<option value="">Pridať do sveta ako…</option>${CATS.filter(c => c.id !== "mapa").map(c => `<option value="${c.id}">${esc(c.one || c.name)}</option>`).join("")}`;
+  pg.innerHTML = `<h2 class="tp-h">Mená mimo sveta</h2>
+    <p class="hint">Slová s veľkým písmenom uprostred vety, ktoré nie sú vo Svete ani medzi tvarmi mien. Odhalia preklepy v menách aj postavy či miesta, ktoré si zabudla zapísať.</p>
+    ${list.length ? `<div class="nlist">${list.map((r, i) => `<div class="nrow${r.typo ? " typo" : ""}" data-ni="${i}">
+        <div class="nr-h"><b class="nr-w">${esc(r.w)}</b><span class="mono hint">${r.n}×</span>${r.typo ? `<span class="badge warn">Možno preklep: ${esc(r.typo.to)}</span>` : ""}<span class="spacer"></span><button class="btn sm ghost" data-nign="${i}">Ignorovať</button></div>
+        <div class="chips">${[...r.scenes].slice(0, 6).map(id => { const n = findNode(id)?.n; return n ? `<button class="chip link" data-ngo="${id}" data-nw="${esc(r.w)}">${esc(n.title || tl("Bez názvu"))}</button>` : ""; }).join("")}${r.scenes.size > 6 ? `<span class="hint">+${r.scenes.size - 6}</span>` : ""}</div>
+        <div class="nr-a">${r.typo ? `<button class="btn sm primary" data-nfix="${i}">Opraviť na „${esc(r.typo.to)}“</button>` : ""}<select class="inp" data-nadd="${i}">${catSel(r.w)}</select><select class="inp" data-nform="${i}">${entSel()}</select></div></div>`).join("")}</div>`
+      : `<p class="empty">${esc(tl("Všetky mená v rukopise sú vo Svete. Výborne!"))}</p>`}
+    ${ign.length ? `<details class="nign"><summary>${tl("Ignorované slová ({x})").replace("{x}", ign.length)}</summary><div class="chips">${ign.map((w, i) => `<span class="chip">${esc(w)}<button class="x" data-nunign="${i}" aria-label="Vrátiť">×</button></span>`).join("")}</div></details>` : ""}`;
+  const again = () => renderNamesTool(pg);
+  $$("[data-nign]", pg).forEach(b => b.onclick = () => { S.p.nameIgnore = [...new Set([...(S.p.nameIgnore || []), list[+b.dataset.nign].w])]; saveProject(); again(); });
+  $$("[data-nunign]", pg).forEach(b => b.onclick = () => { S.p.nameIgnore = (S.p.nameIgnore || []).filter((_, i) => i !== +b.dataset.nunign); saveProject(); again(); });
+  $$("[data-nfix]", pg).forEach(b => b.onclick = async () => { const r = list[+b.dataset.nfix]; const k = await replaceAll([[r.w, r.typo.to]], { whole: true, cs: true, meta: true }); toast(tl("Opravené: {x}×").replace("{x}", k)); renderBinder(); again(); });
+  $$("[data-nadd]", pg).forEach(s => s.onchange = () => { if (!s.value) return; const r = list[+s.dataset.nadd], id = uid("e"); S.ents[id] = { id, cat: s.value, name: r.w, summary: "", fields: {}, custom: [], notes: "", tags: [], created: Date.now() }; saveEnt(id); toast(tl("„{x}“ pridané do sveta.").replace("{x}", r.w)); again(); });
+  $$("[data-nform]", pg).forEach(s => s.onchange = () => { if (!s.value) return; const r = list[+s.dataset.nform], e = S.ents[s.value]; addForms(e, [r.w]); toast(tl("Pridané ako tvar mena {x}.").replace("{x}", e.name)); again(); });
+  $$("[data-ngo]", pg).forEach(b => b.onclick = () => { const id = b.dataset.ngo, f = findNode(id); if (f && f.parent) setOpen(f.parent, true); S.tool = null; renderBinder(); select(id); markWord(b.dataset.nw); });
+}
+/* briefly mark a word in the open scene */
+function markWord(w) {
+  if (!hasHL()) return;
+  setTimeout(() => {
+    const ed = $("#ed"); if (!ed) return; const ranges = [], tw = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT); let x;
+    const re = new RegExp("(?<![\\p{L}\\p{N}])" + reEsc(w) + "(?![\\p{L}\\p{N}])", "gu");
+    while ((x = tw.nextNode())) { re.lastIndex = 0; let m; while ((m = re.exec(x.data))) { const r = new Range(); r.setStart(x, m.index); r.setEnd(x, m.index + m[0].length); ranges.push(r); } }
+    if (!ranges.length) return;
+    CSS.highlights.set("kr-find", new Highlight(...ranges));
+    const b = ranges[0].getBoundingClientRect(), sc = ed.closest(".edscroll"); if (sc) sc.scrollBy({ top: b.top - sc.getBoundingClientRect().top - 120, behavior: "smooth" });
+    setTimeout(() => CSS.highlights.delete("kr-find"), 6000);
+  }, 80);
+}
+
+/* sprints on the Project page */
+function statsExtras(main) {
+  const p = S.p, sp = (p.sprints || []).slice().reverse(), box = $(".export-in", main); if (!box) return;
+  const card = document.createElement("div"); card.className = "card";
+  const tw = sp.reduce((a, s) => a + s.words, 0), tm = sp.reduce((a, s) => a + s.min, 0), best = sp.length ? Math.max(...sp.map(s => s.words / Math.max(1, s.min))) : 0;
+  card.innerHTML = `<h3>Písacie šprinty<span class="spacer"></span><button class="btn sm" id="stSprint">${I.timer}Nový šprint</button></h3>
+    ${sp.length ? `<div class="statrow" style="grid-template-columns:repeat(auto-fit,minmax(90px,1fr))"><div class="stat"><b>${sp.length}</b><span>${plural(sp.length, "šprint", "šprinty", "šprintov")}</span></div><div class="stat"><b>${nf(tw)}</b><span>slov</span></div><div class="stat"><b>${nf(Math.round(tm))}</b><span>minút</span></div><div class="stat"><b>${Math.round(best)}</b><span>najviac slov/min</span></div></div>
+      <div class="sprints">${sp.slice(0, 8).map(s => `<div class="sprow"><span class="hint">${fmtWhen(s.at)}</span><span class="mono">${String(s.min).replace(".", ",")} min</span><b class="mono">${nf(s.words)} sl.</b><span class="sp-bar"><i style="width:${Math.min(100, s.words / Math.max(1, s.min) / Math.max(1, best) * 100).toFixed(0)}%"></i></span></div>`).join("")}</div>`
+      : `<p class="hint">Šprint spustíš ikonou stopiek v hornej lište editora. Tu uvidíš, koľko si v šprintoch napísala.</p>`}`;
+  box.appendChild(card);
+  $("#stSprint", card).onclick = () => { setMode("write"); setTimeout(() => openSprintMenu(), 50); };
+}
+</script>

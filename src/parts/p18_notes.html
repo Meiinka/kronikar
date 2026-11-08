@@ -32,6 +32,8 @@
 .st-ref button{border:0;background:none;padding:0 3px;color:var(--ink-3)}
 .st-ref .go{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px;padding:0}
 .st-ref .go:hover{text-decoration:underline}
+.st-ref.ent{border-left:3px solid var(--ec)}
+.ecard .nbadge{position:absolute;top:8px;right:8px;font-family:var(--f-mono);font-size:10px;line-height:1;padding:2px 5px;border-radius:4px;background:color-mix(in srgb,#C0812A 22%,var(--paper));color:var(--ink-2)}
 .st-add{border:1px dashed color-mix(in srgb,var(--nc) 40%,var(--line));background:transparent;border-radius:999px;font-size:12px;padding:2px 6px;color:var(--ink-2);max-width:100%}
 .st-foot{display:flex;justify-content:space-between;gap:8px;font-size:11px;color:var(--ink-3)}
 .sticky .confirm{font-size:12.5px}
@@ -50,6 +52,27 @@
 .inote .cn{display:block;font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:color-mix(in srgb,var(--nc) 75%,var(--ink))}
 .iqadd{display:flex;gap:6px}
 .iqadd .inp{flex:1}
+.nswitch{flex:none}
+.ideas{display:grid;grid-template-columns:minmax(240px,340px) minmax(0,1fr);gap:14px;align-items:start}
+.idlist{display:flex;flex-direction:column;gap:8px}
+.idcard{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid var(--line-2);border-left:4px solid var(--ink-3);background:var(--paper);border-radius:7px;padding:9px 11px;font:inherit;color:var(--ink);cursor:pointer}
+.idcard:has(.fut){border-left-color:#2F6FA8}.idcard:has(.retro){border-left-color:#8E3550}
+.idcard.sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+.idcard.used{opacity:.65}
+.idcard b{font-family:var(--f-display);font-size:15px}
+.idcard .ids{font-size:12.5px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.idcard .idk{display:flex;gap:4px;flex-wrap:wrap}.idcard .idk:empty{display:none}
+.idcard .idm{display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
+.badge.fut{background:color-mix(in srgb,#2F6FA8 16%,var(--paper));color:#2F6FA8}.badge.retro{background:color-mix(in srgb,#8E3550 16%,var(--paper));color:#8E3550}
+.iddet{display:flex;flex-direction:column;gap:10px;position:sticky;top:10px}
+.id-h{display:flex;align-items:center;gap:8px}
+.id-t{font-family:var(--f-display);font-size:20px;font-weight:600}
+.id-text{min-height:260px}
+.id-foot{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.id-put{border:1px solid var(--accent);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.idmini{display:flex;flex-direction:column;gap:3px;align-items:flex-start}.idmini .lnk{text-align:left;font-size:13px}
+@media (max-width:860px){.ideas{grid-template-columns:1fr}.ideas.has-sel .idlist{display:none}.iddet{position:static}}
+@media (min-width:861px){.iddet .mobonly{display:none}}
 @media (max-width:760px){.nboard{grid-template-columns:1fr 1fr;gap:10px}.nbar select.inp{flex:1 1 100%}}
 @media (max-width:460px){.nboard{grid-template-columns:1fr}}
 </style>
@@ -79,7 +102,10 @@ function nodeOptions(exclude = []) {
   walk(S.p.binder, (n, par, i, d) => { if (exclude.includes(n.id)) return; const k = n.type === "text" ? "" : n.kind === "part" ? "Časť: " : ""; out.push(`<option value="${n.id}">${"  ".repeat(d)}${k}${esc(n.title || "Bez názvu")}</option>`); });
   return out.join("");
 }
-const nodeTitle = id => { const f = findNode(id); return f ? (f.n.title || "Bez názvu") : null; };
+const nodeTitle = id => { const f = findNode(id); return f ? (f.n.title || "Bez názvu") : S.ents[id] ? (S.ents[id].name || "Bez mena") : null; };
+/* a note can be tied to chapters / scenes and to world entries (characters, places…) */
+const refLive = r => !!(findNode(r) || S.ents[r]);
+const goRef = r => S.ents[r] && !findNode(r) ? openEnt(r) : goToNode(r);
 /* a note belongs to a node directly, or to a scene inside a chapter it is tied to (when asked with deep) */
 function notesFor(id, deep) {
   const ids = new Set([id]);
@@ -96,11 +122,12 @@ function delNote(id) { const p = noteData(); p.stickies = p.stickies.filter(s =>
 function goToNode(id) { if (!findNode(id)) return toast("Táto časť rukopisu už neexistuje."); S.sel = id; S.mobBinder = false; S.mode = "write"; $$("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === "write")); renderMode(); }
 
 function renderNotes(main) {
+  if (S.nf.view === "ideas") return renderIdeas(main);
   const p = noteData(), f = S.nf;
   if (f.cat !== "all" && f.cat !== "" && !p.noteCats.some(c => c.id === f.cat)) f.cat = "all";
-  if (f.ref !== "all" && f.ref !== "none" && !findNode(f.ref)) f.ref = "all";
+  if (f.ref !== "all" && f.ref !== "none" && !refLive(f.ref)) f.ref = "all";
   const q = norm(f.q.trim());
-  const refOk = s => f.ref === "all" ? true : f.ref === "none" ? !(s.refs || []).some(r => findNode(r)) : notesFor(f.ref, true).includes(s);
+  const refOk = s => f.ref === "all" ? true : f.ref === "none" ? !(s.refs || []).some(refLive) : S.ents[f.ref] ? (s.refs || []).includes(f.ref) : notesFor(f.ref, true).includes(s);
   const base = p.stickies.filter(s => refOk(s) && (!q || norm(s.text).includes(q)) && (!f.hideDone || !s.done));
   const count = id => base.filter(s => (noteCat(s.cat).id) === id).length;
   const list = base.filter(s => f.cat === "all" || noteCat(s.cat).id === f.cat).sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
@@ -109,9 +136,9 @@ function renderNotes(main) {
   const open = p.stickies.filter(s => !s.done).length;
   main.innerHTML = `<div class="notes"><div class="notes-in">
     <div class="nbar">
-      <button class="btn primary" id="nAdd">${I.plus}Nová poznámka</button>
+      ${notesSwitch()}<button class="btn primary" id="nAdd">${I.plus}Nová poznámka</button>
       <input class="inp nsearch" id="nQ" type="search" placeholder="Hľadať v poznámkach" value="${esc(f.q)}" aria-label="Hľadať v poznámkach">
-      <select class="inp" id="nRef" aria-label="Filtrovať podľa rukopisu"><option value="all">Celý rukopis</option><option value="none"${f.ref === "none" ? " selected" : ""}>Nepriradené ku kapitole</option>${nodeOptions()}</select>
+      <select class="inp" id="nRef" aria-label="Filtrovať podľa rukopisu"><option value="all">Celý rukopis</option><option value="none"${f.ref === "none" ? " selected" : ""}>Nepriradené</option>${nodeOptions()}${allEntOptions().replace(/<optgroup label="/g, '<optgroup label="Svet · ')}</select>
       <label class="chk"><input type="checkbox" id="nDone"${f.hideDone ? " checked" : ""}> Skryť vybavené</label>
       <button class="btn" id="nCats" aria-pressed="${f.catEdit}">Kategórie</button>
     </div>
@@ -123,6 +150,7 @@ function renderNotes(main) {
       <span class="hint">Zmazaním kategórie sa poznámky nezmažú, len ostanú bez kategórie.</span></div>` : ""}
     ${list.length ? `<div class="nboard">${list.map(stickyHtml).join("")}</div>` : `<div class="nempty"><h3>${p.stickies.length ? "Nič tomu nezodpovedá" : "Zatiaľ žiadne poznámky"}</h3><p>${p.stickies.length ? "Skús zmeniť filter." : "Poznámky sú ako lepiace papieriky. Môžeš ich priradiť ku kapitolám alebo scénam, alebo nechať voľne."}</p></div>`}
   </div></div>`;
+  bindNotesSwitch(main);
   $("#nAdd").onclick = () => { const s = addNote({ cat: f.cat !== "all" ? f.cat : (p.noteCats[0]?.id || ""), refs: f.ref !== "all" && f.ref !== "none" ? [f.ref] : [] }); f.hideDone = false; f.q = ""; f.fresh = s.id; renderNotes(main); };
   const qi = $("#nQ"); qi.oninput = debounce(() => { f.q = qi.value; renderNotes(main); const n = $("#nQ"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 200);
   $("#nRef").value = f.ref; $("#nRef").onchange = e => { f.ref = e.target.value; renderNotes(main); };
@@ -145,15 +173,15 @@ function renderNotes(main) {
   if (f.fresh) { const t = $(`.sticky[data-nid="${f.fresh}"] .st-text`); f.fresh = null; t?.focus(); }
 }
 function stickyHtml(s) {
-  const c = noteCat(s.cat), refs = (s.refs || []).filter(r => findNode(r));
+  const c = noteCat(s.cat), refs = (s.refs || []).filter(refLive);
   const conf = S.nf.confirm === "note:" + s.id;
   return `<div class="sticky${s.done ? " done" : ""}${S.nf.fresh === s.id ? " fresh" : ""}" data-nid="${s.id}" style="--nc:${esc(c.color)}">
     <div class="st-top"><select class="st-cat" aria-label="Kategória">${[...S.p.noteCats, NOCAT].map(x => `<option value="${esc(x.id)}"${x.id === c.id ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select><span class="spacer"></span>
       <button class="st-btn" data-done aria-pressed="${!!s.done}" title="${s.done ? "Vrátiť medzi otvorené" : "Označiť ako vybavené"}" aria-label="Vybavené">${I.check}</button>
       <button class="st-btn" data-del title="Zmazať poznámku" aria-label="Zmazať poznámku">×</button></div>
     <textarea class="st-text" rows="3" placeholder="Napíš poznámku…" aria-label="Text poznámky">${esc(s.text)}</textarea>
-    <div class="st-refs">${refs.map(r => `<span class="st-ref"><button class="go" data-go="${r}" title="Otvoriť v rukopise">${esc(nodeTitle(r))}</button><button data-unref="${r}" aria-label="Odobrať">×</button></span>`).join("")}
-      <select class="st-add" aria-label="Priradiť ku kapitole alebo scéne"><option value="">${refs.length ? "+ ďalšia…" : "+ Priradiť ku kapitole…"}</option>${nodeOptions(refs)}</select></div>
+    <div class="st-refs">${refs.map(r => `<span class="st-ref${S.ents[r] && !findNode(r) ? " ent" : ""}"${S.ents[r] && !findNode(r) ? ` style="--ec:${catColor(S.ents[r].cat)}"` : ""}><button class="go" data-go="${r}" title="${S.ents[r] && !findNode(r) ? "Otvoriť vo Svete" : "Otvoriť v rukopise"}">${esc(nodeTitle(r))}</button><button data-unref="${r}" aria-label="Odobrať">×</button></span>`).join("")}
+      <select class="st-add" aria-label="Priradiť ku kapitole, scéne alebo postave"><option value="">${refs.length ? "+ ďalšie…" : "+ Priradiť ku kapitole alebo postave…"}</option>${nodeOptions(refs)}${allEntOptions(refs).replace(/<optgroup label="/g, '<optgroup label="Svet · ')}</select></div>
     ${conf ? `<div class="confirm"><b>Zmazať poznámku?</b><div class="btnrow"><button class="btn sm danger solid" data-delyes>Zmazať</button><button class="btn sm" data-delno>Nechať</button></div></div>` : `<div class="st-foot"><span>${relTime(s.updated || s.created)}</span></div>`}
   </div>`;
 }
@@ -169,7 +197,26 @@ function bindSticky(el, rerender) {
   $("[data-delno]", el)?.addEventListener("click", () => { S.nf.confirm = null; rerender(); });
   $(".st-add", el).onchange = e => { const v = e.target.value; if (!v) return; s.refs = [...new Set([...(s.refs || []), v])]; s.updated = Date.now(); saveProject(); rerender(); };
   $$("[data-unref]", el).forEach(b => b.onclick = () => { s.refs = (s.refs || []).filter(r => r !== b.dataset.unref); saveProject(); rerender(); });
-  $$("[data-go]", el).forEach(b => b.onclick = () => goToNode(b.dataset.go));
+  $$("[data-go]", el).forEach(b => b.onclick = () => goRef(b.dataset.go));
+}
+/* world entry: notes tied to this character / place / … */
+function mountNoteEnt(box, e) {
+  if (!box) return;
+  const p = noteData(), own = p.stickies.filter(s => (s.refs || []).includes(e.id)).sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0)), open = own.filter(s => !s.done).length;
+  const row = s => { const c = noteCat(s.cat), other = (s.refs || []).filter(r => r !== e.id && refLive(r)).map(nodeTitle); return `<div class="inote${s.done ? " done" : ""}" style="--nc:${esc(c.color)}"><input type="checkbox" data-idone="${s.id}"${s.done ? " checked" : ""} aria-label="Vybavené"><div class="tx" data-iopen="${s.id}" title="Otvoriť v poznámkach"><span class="cn">${esc(c.name)}${other.length ? ` · <span class="no-tr">${esc(other.join(", "))}</span>` : ""}</span><span class="no-tr">${esc(s.text || "…")}</span></div></div>`; };
+  box.innerHTML = `<h3>Lepiace poznámky ${own.length ? `<span class="mono" style="letter-spacing:0">${open}/${own.length}</span>` : ""}</h3>
+    ${own.length ? `<div class="inotes">${own.map(row).join("")}</div>` : `<span class="hint">Čo treba pri ${e.cat === "postava" ? "tejto postave" : "tomto zázname"} zapracovať, opraviť alebo overiť. Poznámky uvidíš aj na nástenke Poznámky.</span>`}
+    <div class="iqadd"><select class="inp" data-eqcat aria-label="Kategória" style="flex:0 1 38%">${[...p.noteCats, NOCAT].map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input class="inp" data-eqtext placeholder="Nová poznámka…" aria-label="Nová poznámka">${micBtn("data-eqmic", "btn")}<button class="btn" data-eqadd>${I.plus}Pridať</button></div>
+    ${own.length ? `<button class="lnk hint" data-eqall>Otvoriť na nástenke Poznámky →</button>` : ""}
+    ${ideas().some(d => (d.ents || []).includes(e.id)) ? `<div class="lbl" style="margin-top:10px">${esc(tl("Nápady na scény"))}</div>${ideasListHtml(ideas().filter(d => (d.ents || []).includes(e.id)))}` : ""}`;
+  const again = () => { mountNoteEnt(box, e); const card = document.querySelector(`.ecard[data-ent="${e.id}"]`); if (card) { card.querySelector(".nbadge")?.remove(); const nb = noteBadge(e.id); if (nb) card.insertAdjacentHTML("afterbegin", nb); } };
+  const add = () => { const t = $("[data-eqtext]", box).value.trim(); if (!t) return $("[data-eqtext]", box).focus(); addNote({ text: t, cat: $("[data-eqcat]", box).value, refs: [e.id] }); again(); toast("Poznámka pridaná."); };
+  bindIdeasList(box);
+  $("[data-eqmic]", box)?.addEventListener("click", ev => dictate(t => appendDictated($("[data-eqtext]", box), t), ev.currentTarget));
+  $("[data-eqadd]", box).onclick = add; $("[data-eqtext]", box).onkeydown = ev => { if (ev.key === "Enter") add(); };
+  $("[data-eqall]", box)?.addEventListener("click", () => { S.nf.ref = e.id; S.nf.cat = "all"; S.nf.hideDone = false; setMode("notes"); });
+  $$("[data-idone]", box).forEach(c => c.onchange = () => { const s = p.stickies.find(x => x.id === c.dataset.idone); if (s) { s.done = c.checked; s.updated = Date.now(); saveProject(); again(); } });
+  $$("[data-iopen]", box).forEach(d => d.onclick = () => { S.nf.ref = e.id; S.nf.cat = "all"; S.nf.hideDone = false; S.nf.fresh = d.dataset.iopen; setMode("notes"); });
 }
 /* inspector section in the manuscript: notes tied to the selected chapter / scene */
 function mountNoteInsp(box, n) {
@@ -180,13 +227,119 @@ function mountNoteInsp(box, n) {
   const open = own.filter(s => !s.done).length;
   box.innerHTML = `<span class="lbl">Lepiace poznámky ${own.length ? `<span class="mono">${open}/${own.length}</span>` : ""}</span>
     <div class="inotes">${own.map(s => row(s)).join("")}${inside.map(s => row(s, (s.refs || []).map(nodeTitle).filter(Boolean)[0] || "")).join("")}${parentNotes.map(s => row(s, "z nadradenej kapitoly")).join("")}</div>
-    <div class="iqadd"><select class="inp" id="iqCat" aria-label="Kategória" style="flex:0 1 44%">${[...p.noteCats, NOCAT].map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input class="inp" id="iqText" placeholder="Nová poznámka…" aria-label="Nová poznámka"></div>
-    <div class="btnrow"><button class="btn sm" id="iqAdd">${I.plus}Pridať</button><button class="btn sm ghost" id="iqAll">Všetky poznámky</button></div>`;
+    <div class="iqadd"><select class="inp" id="iqCat" aria-label="Kategória" style="flex:0 1 44%">${[...p.noteCats, NOCAT].map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><input class="inp" id="iqText" placeholder="Nová poznámka…" aria-label="Nová poznámka">${micBtn('id="iqMic"', "btn")}</div>
+    <div class="btnrow"><button class="btn sm" id="iqAdd">${I.plus}Pridať</button><button class="btn sm ghost" id="iqAll">Všetky poznámky</button></div>
+    ${(() => { const L = ideas().filter(d => d.near === n.id || d.scene === n.id || (d.near && findNode(d.near)?.parent?.id === n.id)); return L.length ? `<span class="lbl" style="margin-top:8px">${esc(tl("Nápady na scény"))}</span>${ideasListHtml(L)}` : ""; })()}`;
   const rerender = () => { mountNoteInsp(box, n); const b = $(`#binder .bnode[data-id="${n.id}"] .nbadge`), w = $(`#binder .bnode[data-id="${n.id}"]`); if (w) { b?.remove(); const nb = noteBadge(n.id); if (nb) $(".w", w)?.insertAdjacentHTML("beforebegin", nb); } };
   const add = () => { const t = $("#iqText").value.trim(); if (!t) return $("#iqText").focus(); addNote({ text: t, cat: $("#iqCat").value, refs: [n.id] }); rerender(); toast("Poznámka pridaná."); };
+  bindIdeasList(box);
+  $("#iqMic")?.addEventListener("click", ev => dictate(t => appendDictated($("#iqText"), t), ev.currentTarget));
   $("#iqAdd").onclick = add; $("#iqText").onkeydown = e => { if (e.key === "Enter") add(); };
   $("#iqAll").onclick = () => { S.nf.ref = n.id; S.nf.cat = "all"; setMode("notes"); };
   $$("[data-idone]", box).forEach(c => c.onchange = () => { const s = p.stickies.find(x => x.id === c.dataset.idone); if (s) { s.done = c.checked; s.updated = Date.now(); saveProject(); rerender(); } });
   $$("[data-iopen]", box).forEach(d => d.onclick = () => { const s = p.stickies.find(x => x.id === d.dataset.iopen); S.nf.ref = s && notesFor(n.id, true).includes(s) ? n.id : "all"; S.nf.cat = "all"; S.nf.hideDone = false; S.nf.fresh = s?.id || null; setMode("notes"); });
 }
+
+/* ================= scene ideas: longer drafts kept outside the book (S.p.ideas) =================
+   idea = {id, t, html, kind: "future"|"retro"|"", st: "idea"|"wip"|"used", ents: [], near: nodeId, time: {from,to}, scene: nodeId, created, updated} */
+const ideas = () => (S.p.ideas = S.p.ideas || []);
+const IDEA_KIND = { "": "Neurčené", future: "Do budúcnosti", retro: "Retrospektíva" };
+const IDEA_ST = { idea: "Nápad", wip: "Rozpracované", used: "Použité v rukopise" };
+S.idf = { kind: "all", q: "", sel: null, confirm: null, put: false };
+const notesSwitch = () => `<div class="segs nswitch"><button class="seg${S.nf.view !== "ideas" ? " on" : ""}" data-nview="notes">${esc(tl("Lepiace poznámky"))}</button><button class="seg${S.nf.view === "ideas" ? " on" : ""}" data-nview="ideas">${esc(tl("Nápady na scény"))} ${ideas().length ? `<b class="mono">${ideas().length}</b>` : ""}</button></div>`;
+function bindNotesSwitch(main) { $$("[data-nview]", main).forEach(b => b.onclick = () => { S.nf.view = b.dataset.nview; renderNotes(main); }); }
+function openIdea(id) { S.nf.view = "ideas"; S.idf.sel = id; S.idf.confirm = null; S.idf.put = false; setMode("notes"); }
+const ideaWords = d => countWords(htmlToText(d.html || ""));
+/* contenteditable output → clean paragraphs (loose text lines and divs become <p>) */
+function toParas(html) {
+  const box = document.createElement("div"); box.innerHTML = html || ""; const out = []; let cur = [];
+  const flush = () => { const h = cur.map(n => n.nodeType === 3 ? esc(n.textContent) : n.outerHTML).join("").trim(); if (h && h !== "<br>") out.push("<p>" + h + "</p>"); cur = []; };
+  [...box.childNodes].forEach(n => { const tg = n.nodeType === 1 ? n.tagName : ""; if (tg === "P" || tg === "DIV" || /^H\d$/.test(tg) || tg === "BLOCKQUOTE") { flush(); const h = n.innerHTML.trim(); if (h && h !== "<br>") out.push(tg === "BLOCKQUOTE" ? n.outerHTML : "<p>" + h + "</p>"); } else if (tg === "BR") flush(); else cur.push(n); });
+  flush(); return out.join("");
+}
+function renderIdeas(main) {
+  const f = S.idf, q = norm(f.q.trim());
+  if (f.sel && !ideas().some(d => d.id === f.sel)) f.sel = null;
+  const list = ideas().filter(d => (f.kind === "all" || (f.kind === "used" ? d.st === "used" : d.kind === f.kind && d.st !== "used")) && (!q || norm(d.t + " " + htmlToText(d.html || "")).includes(q))).sort((a, b) => (a.st === "used" ? 1 : 0) - (b.st === "used" ? 1 : 0) || (b.updated || b.created || 0) - (a.updated || a.created || 0));
+  const cnt = k => ideas().filter(d => k === "used" ? d.st === "used" : d.kind === k && d.st !== "used").length;
+  const card = d => `<button class="idcard${f.sel === d.id ? " sel" : ""}${d.st === "used" ? " used" : ""}" data-idea="${d.id}">
+      <span class="idk">${d.kind ? `<span class="badge ${d.kind === "retro" ? "retro" : "fut"}">${esc(tl(IDEA_KIND[d.kind] || String(d.kind)))}</span>` : ""}${d.st && d.st !== "idea" ? `<span class="badge soft">${esc(tl(IDEA_ST[d.st] || String(d.st)))}</span>` : ""}</span>
+      <b class="no-tr">${esc(d.t || tl("Bez názvu"))}</b>
+      <span class="ids no-tr">${esc(htmlToText(d.html || "").replace(/\s+/g, " ").slice(0, 150))}</span>
+      <span class="idm">${(d.ents || []).filter(id => S.ents[id]).map(id => `<i class="dot" style="background:${catColor(S.ents[id].cat)}"></i><span class="no-tr">${esc(S.ents[id].name)}</span>`).join(" ")}${d.near && findNode(d.near) ? ` · <span class="no-tr">${esc(evNodeLabel(d.near))}</span>` : ""}<span class="spacer"></span><span class="mono">${nf(ideaWords(d))} ${esc(tl("sl."))}</span></span></button>`;
+  const d = ideas().find(x => x.id === f.sel);
+  main.innerHTML = `<div class="notes"><div class="notes-in">
+    <div class="nbar">${notesSwitch()}<button class="btn primary" id="idAdd">${I.plus}${esc(tl("Nový nápad"))}</button>
+      <input class="inp nsearch" id="idQ" type="search" placeholder="${esc(tl("Hľadať v nápadoch"))}" value="${esc(f.q)}"></div>
+    <div class="ncats"><button class="ncat${f.kind === "all" ? " on" : ""}" data-idk="all">${esc(tl("Všetky"))} <b>${ideas().length}</b></button><button class="ncat${f.kind === "future" ? " on" : ""}" data-idk="future" style="--nc:#2F6FA8"><i></i>${esc(tl("Do budúcnosti"))} <b>${cnt("future")}</b></button><button class="ncat${f.kind === "retro" ? " on" : ""}" data-idk="retro" style="--nc:#8E3550"><i></i>${esc(tl("Retrospektívy"))} <b>${cnt("retro")}</b></button><button class="ncat${f.kind === "" ? " on" : ""}" data-idk="" style="--nc:#8790A1"><i></i>${esc(tl("Neurčené"))} <b>${cnt("")}</b></button><button class="ncat${f.kind === "used" ? " on" : ""}" data-idk="used" style="--nc:var(--st-hotovo)"><i></i>${esc(tl("Použité"))} <b>${cnt("used")}</b></button></div>
+    <div class="ideas${d ? " has-sel" : ""}">
+      <div class="idlist">${list.map(card).join("") || `<div class="nempty"><h3>${esc(ideas().length ? tl("Nič tomu nezodpovedá") : tl("Zatiaľ žiadne nápady"))}</h3><p>${esc(tl("Scény, ktoré už máš v hlave, ale do rukopisu ešte nepatria – kľudne aj dlhšie. Označ, či sú do budúcnosti alebo retrospektíva, prepoj ich s postavami a kapitolou. Keď príde ich čas, jedným tlačidlom ich vložíš do rukopisu ako scénu."))}</p></div>`}</div>
+      <div class="iddet card" id="idDet">${d ? "" : `<p class="hint">${esc(tl("Vyber nápad zo zoznamu alebo pridaj nový."))}</p>`}</div>
+    </div></div></div>`;
+  bindNotesSwitch(main);
+  const again = () => renderIdeas(main);
+  $("#idAdd").onclick = () => { const n = { id: uid("id"), t: "", html: "", kind: "", st: "idea", ents: [], created: Date.now() }; ideas().unshift(n); f.sel = n.id; f.kind = "all"; f.q = ""; saveProject(); again(); setTimeout(() => $("#idT")?.focus(), 30); };
+  const qi = $("#idQ"); qi.oninput = debounce(() => { f.q = qi.value; again(); const n = $("#idQ"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 200);
+  $$("[data-idk]", main).forEach(b => b.onclick = () => { f.kind = b.dataset.idk; again(); });
+  $$("[data-idea]", main).forEach(b => b.onclick = () => { f.sel = b.dataset.idea; f.confirm = null; f.put = false; again(); if (innerWidth < 860) window.scrollTo(0, 0); });
+  if (d) mountIdeaDetail($("#idDet", main), d, again);
+}
+function mountIdeaDetail(box, d, again) {
+  const f = S.idf, sv = () => { d.updated = Date.now(); saveProject(); };
+  const chips = (d.ents || []).filter(id => S.ents[id]).map(id => `<span class="chip"><span class="cd" style="background:${catColor(S.ents[id].cat)}"></span><button class="chipname no-tr" data-ideago="${id}">${esc(S.ents[id].name)}</button><button class="x" data-iderm="${id}" aria-label="${esc(tl("Odobrať"))}">×</button></span>`).join("");
+  const folders = []; walk(S.p.binder, n => { if (n.type === "folder") folders.push(n); });
+  box.innerHTML = `<div class="id-h"><button class="btn sm ghost mobonly" id="idBack">${I.back}${esc(tl("Všetky nápady"))}</button><span class="spacer"></span><span class="hint">${esc(relTime(d.updated || d.created))}</span></div>
+    <input class="inp id-t no-tr" id="idT" value="${esc(d.t || "")}" placeholder="${esc(tl("Názov nápadu, napr. Ilsa sa vracia do vyhorenej kováčne"))}">
+    <div class="segs small id-kind">${Object.entries(IDEA_KIND).map(([k, v]) => `<button class="seg${(d.kind || "") === k ? " on" : ""}" data-idkind="${k}">${esc(tl(v))}</button>`).join("")}</div>
+    <div class="fgrid id-meta"><label class="field"><span>${esc(tl("Stav"))}</span><select class="inp" id="idSt">${Object.entries(IDEA_ST).map(([k, v]) => `<option value="${k}"${(d.st || "idea") === k ? " selected" : ""}>${esc(tl(v))}</option>`).join("")}</select></label>
+      <label class="field"><span>${esc(tl("Patrí približne ku"))}</span><select class="inp" id="idNear"><option value="">${esc(tl("— zatiaľ neviem —"))}</option>${evOptions().replace(/<optgroup label="([^"]*)"><option value="([^"]*)">([^<]*)</g, (m, l, v, t) => `<optgroup label="${l}"><option value="${v}">${t === tl("Celá kapitola") || t === "Celá kapitola" ? l + " – " + tl("celá kapitola") : t}<`).replace(`value="${d.near}"`, `value="${d.near}" selected`)}</select></label></div>
+    <div class="field"><span>${esc(tl("Postavy, miesta a iné zo Sveta"))}</span><div class="chips">${chips || `<span class="hint">${esc(tl("Zatiaľ nič."))}</span>`}</div><select class="inp" id="idEnt"><option value="">${esc(tl("+ Pridať zo sveta…"))}</option>${allEntOptions(d.ents || [])}</select></div>
+    <details class="reltime"${d.time && tvOk(d.time.from) ? " open" : ""}><summary>${I.clock} ${esc(tl("Kedy sa to deje (čas deja)"))}</summary><div id="idTime">${timeEditorHtml(d, "scene")}</div></details>
+    <div class="notes-ed id-text no-tr" id="idText" contenteditable="true" lang="${bookLang()}" data-ph="${esc(tl("Tu si nápad rozpíš – kľudne celé odseky, dialógy, útržky…"))}">${d.html || ""}</div>
+    <div class="id-foot">${micBtn('id="idMic"')}<span class="hint" id="idWc">${nf(ideaWords(d))} ${esc(tl("slov"))}</span><span class="spacer"></span>
+      ${d.scene && findNode(d.scene) ? `<button class="btn sm" id="idGoScene">${I.doc}${esc(tl("Otvoriť scénu v rukopise"))}</button>` : ""}
+      <button class="btn sm${f.put ? " on" : ""}" id="idPut">${I.doc}${esc(tl("Vložiť do rukopisu ako scénu…"))}</button>
+      ${f.confirm === d.id ? `<span class="confirm" style="flex-direction:row;align-items:center;padding:4px 8px"><span>${esc(tl("Zmazať nápad?"))}</span><button class="btn sm danger solid" id="idDelYes">${esc(tl("Zmazať"))}</button><button class="btn sm" id="idDelNo">${esc(tl("Nechať"))}</button></span>` : `<button class="btn sm ghost danger" id="idDel">${I.trash}${esc(tl("Zmazať"))}</button>`}</div>
+    ${f.put ? `<div class="id-put"><label class="field"><span>${esc(tl("Do ktorej kapitoly vložiť novú scénu"))}</span><select class="inp" id="idInto">${folders.map(n => `<option value="${n.id}"${d.near && (d.near === n.id || findNode(d.near)?.parent?.id === n.id) ? " selected" : ""}>${esc(evNodeLabel(n.id) || n.title)}</option>`).join("")}<option value="">${esc(tl("Na koniec rukopisu"))}</option></select></label>
+      <label class="chk"><input type="checkbox" id="idKeep" checked> ${esc(tl("Nápad si nechať a označiť ako použitý"))}</label>
+      <div class="btnrow"><button class="btn primary" id="idPutGo">${esc(tl("Vložiť"))}</button><button class="btn ghost" id="idPutNo">${esc(tl("Zrušiť"))}</button></div>
+      <span class="hint">${esc(tl("Vznikne nová scéna s textom nápadu, jeho postavami a časom deja. Text potom v rukopise ďalej upravuješ."))}</span></div>` : ""}`;
+  $("#idBack").onclick = () => { f.sel = null; again(); };
+  const t = $("#idT", box); t.oninput = () => { d.t = t.value; sv(); const c = $(`[data-idea="${d.id}"] b`); if (c) c.textContent = d.t || tl("Bez názvu"); };
+  $$("[data-idkind]", box).forEach(b => b.onclick = () => { d.kind = b.dataset.idkind; sv(); again(); });
+  $("#idSt", box).onchange = ev => { d.st = ev.target.value; sv(); again(); };
+  $("#idNear", box).onchange = ev => { if (ev.target.value) d.near = ev.target.value; else delete d.near; sv(); again(); };
+  $("#idEnt", box).onchange = ev => { if (!ev.target.value) return; d.ents = [...new Set([...(d.ents || []), ev.target.value])]; sv(); again(); };
+  $$("[data-iderm]", box).forEach(b => b.onclick = () => { d.ents = (d.ents || []).filter(x => x !== b.dataset.iderm); sv(); again(); });
+  $$("[data-ideago]", box).forEach(b => b.onclick = () => openEnt(b.dataset.ideago));
+  bindTimeEditor($("#idTime", box), d, sv);
+  const ed = $("#idText", box), wc = $("#idWc", box);
+  ed.oninput = debounce(() => { d.html = cleanEditorHtml(ed.innerHTML); sv(); wc.textContent = nf(ideaWords(d)) + " " + tl("slov"); const c = $(`[data-idea="${d.id}"] .ids`); if (c) c.textContent = htmlToText(d.html).replace(/\s+/g, " ").slice(0, 150); const m = $(`[data-idea="${d.id}"] .idm .mono`); if (m) m.textContent = nf(ideaWords(d)) + " " + tl("sl."); }, 300);
+  ed.addEventListener("paste", ev => { ev.preventDefault(); const h = ev.clipboardData.getData("text/html"), tx = ev.clipboardData.getData("text/plain"); document.execCommand("insertHTML", false, h ? sanitizeHtml(h) : tx.split(/\r?\n/).filter(x => x.trim()).map(p => "<p>" + esc(p) + "</p>").join("")); });
+  $("#idMic", box)?.addEventListener("click", ev => dictate(t => appendDictated(ed, t), ev.currentTarget));
+  $("#idGoScene", box)?.addEventListener("click", () => goToNode(d.scene));
+  $("#idPut", box).onclick = () => { f.put = !f.put; again(); };
+  $("#idPutNo", box)?.addEventListener("click", () => { f.put = false; again(); });
+  $("#idPutGo", box)?.addEventListener("click", () => {
+    d.html = cleanEditorHtml(ed.innerHTML);
+    const into = $("#idInto", box).value, keep = $("#idKeep", box).checked, prevSel = S.sel;
+    if (!into) S.sel = null;
+    const node = addNode("text", { title: d.t || tl("Nová scéna"), into: into || undefined });
+    S.items[node.id].html = toParas(d.html);
+    node.words = countWords(htmlToText(S.items[node.id].html)); node.ents = (d.ents || []).filter(id => S.ents[id]);
+    const place = node.ents.find(id => S.ents[id].cat === "krajina"); if (place) node.place = place;
+    if (d.time && tvOk(d.time.from)) node.time = JSON.parse(JSON.stringify(d.time));
+    node.synopsis = d.kind === "retro" ? tl("Retrospektíva") : "";
+    saveItem(node.id); saveProject();
+    if (keep) { d.st = "used"; d.scene = node.id; d.updated = Date.now(); } else S.p.ideas = ideas().filter(x => x !== d);
+    f.put = false; saveProject(); if (!into) S.sel = prevSel || node.id;
+    toast(tl("Scéna „{x}“ je v rukopise.", node.title)); again();
+  });
+  $("#idDel", box)?.addEventListener("click", () => { if (!d.t && !htmlToText(d.html || "").trim()) { S.p.ideas = ideas().filter(x => x !== d); f.sel = null; saveProject(); return again(); } f.confirm = d.id; again(); });
+  $("#idDelNo", box)?.addEventListener("click", () => { f.confirm = null; again(); });
+  $("#idDelYes", box)?.addEventListener("click", () => { S.p.ideas = ideas().filter(x => x !== d); f.sel = null; f.confirm = null; saveProject(); again(); toast(tl("Nápad zmazaný.")); });
+}
+/* small lists of ideas in a world entry and in the chapter inspector */
+function ideasListHtml(list) { return list.length ? `<div class="idmini">${list.map(d => `<button class="lnk" data-openidea="${d.id}">${d.kind === "retro" ? "↩ " : d.kind === "future" ? "→ " : ""}<span class="no-tr">${esc(d.t || tl("Bez názvu"))}</span>${d.st === "used" ? ` <small class="hint">· ${esc(tl("použité"))}</small>` : ""}</button>`).join("")}</div>` : ""; }
+function bindIdeasList(box) { $$("[data-openidea]", box).forEach(b => b.onclick = () => openIdea(b.dataset.openidea)); }
 </script>

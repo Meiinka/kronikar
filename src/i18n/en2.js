@@ -109,3 +109,21 @@ Object.assign(EN, {
 "Dejiny, legendy, nápady, citáty… všetko, čo sa nezmestí do políčok.": "History, legends, ideas, quotes… anything that doesn't fit the fields.",
 "Rukopis SK / CZ": "Manuscript SK / CZ", "US – Shunn": "US – Shunn",
 });
+Object.assign(EN, {
+"scéne „{x}“": "the scene “{x}”", "štruktúre rukopisu a nastaveniach": "the manuscript structure and settings", "svete": "the world", "poznámkach": "the notes", "štatistikách": "the statistics",
+"Načítané zmeny z iného zariadenia.": "Loaded changes from another device.",
+"zo staršej verzie Kronikára": "from an older Kronikár version",
+"Konflikt v {x}": "Conflict in {x}",
+"Syncthing uložil aj druhú verziu tejto časti z iného zariadenia.": "Another device saved a different version of this part at the same time.",
+"Túto časť zmenili naraz dve zariadenia. Teraz vidíš svoju verziu.": "Two devices changed this part at the same time. You are seeing your version.",
+"Ponechať moju verziu": "Keep my version", "Prevziať druhú verziu": "Use the other version",
+"Prevzatá verzia z druhého zariadenia.": "Using the version from the other device.", "Ponechaná tvoja verzia.": "Kept your version.",
+"Nevyriešený konflikt v projekte": "Unresolved conflict in project",
+"Otvor projekt – ukáže, ktorá časť sa líši, a vyberieš si verziu.": "Open the project – it shows which part differs and lets you choose a version.",
+"Každá kniha má vlastný podpriečinok: rukopis po scénach, svet a poznámky zvlášť a čitateľnú kópiu v podpriečinku citatelne. Raz denne sa pridá záloha do zalohy a zmeny z iných zariadení (napr. cez Syncthing) sa načítajú samy.": "Each book has its own subfolder: the manuscript scene by scene, the world and notes separately, and a readable copy in the citatelne subfolder. A backup is added to zalohy once a day, and changes from other devices (e.g. via Syncthing) load automatically.",
+"Čitateľná kópia – Kronikár ju prepisuje automaticky, úpravy rob v aplikácii.": "Readable copy – Kronikár rewrites it automatically; make changes in the app.",
+"Automaticky ukladám do priečinka „{x}“.": "Saving automatically to the folder “{x}”.",
+});
+Object.assign(EN, { "Túto časť zmenili naraz dve zariadenia. Vidíš jednu verziu, druhá je odložená bokom – vyber, ktorú ponechať.": "Two devices changed this part at the same time. You see one version; the other is set aside – choose which to keep." });
+Object.assign(EN, { "Zobraziť druhú verziu": "Show the other version" });
+Object.assign(EN, { "Pre beta čitateľov": "For beta readers", "Očíslované odseky (3.12) na pripomienky, označené ako pracovná verzia": "Numbered paragraphs (3.12) for feedback, marked as a draft", "Verzia pre beta čitateľov": "Beta reader edition", "Pracovná verzia – prosím, nešír ďalej": "Work in progress – please do not share", "Odseky sú očíslované (kapitola.odsek). Pri pripomienkach uveď číslo, napríklad 3.12.": "Paragraphs are numbered (chapter.paragraph). When commenting, quote the number, e.g. 3.12.", "Tiráž": "Copyright" });

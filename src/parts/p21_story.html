@@ -1,0 +1,496 @@
+<script>
+/* ================= story: time of the world, timeline, plot templates, character arcs =================
+   time value {y, m?, d?} in the book's own calendar (S.p.cal = {era, months: [names], mdays});
+   scene: n.time = {from, to?}; world entry: e.time = {from, to?}; plot: S.p.plot = {tpl, basis, beats: {beat: nodeId}};
+   character arc: e.arc = {want, need, lie, truth, ch: {chapterNodeId: {want, change, v}}} */
+Object.assign(I, {
+  beat: '<svg viewBox="0 0 16 16"><path d="M8 1.8l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.2l-3.7 2.1.8-4.2L2 6.2l4.2-.5z" fill="currentColor"/></svg>',
+});
+const MONTHS_SK = ["január", "február", "marec", "apríl", "máj", "jún", "júl", "august", "september", "október", "november", "december"];
+const MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function cal() { const c = (S.p && S.p.cal) || {}; return { era: c.era || "", months: c.months && c.months.length ? c.months : (bookLang() === "en" ? MONTHS_EN : MONTHS_SK), mdays: Math.max(1, +c.mdays || 30) }; }
+const tvOk = tv => tv && tv.y !== undefined && tv.y !== null && tv.y !== "" && isFinite(+tv.y);
+function tnum(tv, end) { if (!tvOk(tv)) return null; const c = cal(), M = c.months.length, D = c.mdays; let off = 0; if (tv.m) off += (tv.m - 1) * D; if (tv.d) off += tv.d - 1; else if (end && tv.m) off += D - 1e-6; if (end && !tv.m) off = M * D - 1e-6; return +tv.y + off / (M * D); }
+function tfmt(tv, short) { if (!tvOk(tv)) return ""; const c = cal(); const yr = String(tv.y) + (c.era && !short ? " " + c.era : ""); return [tv.d ? tv.d + "." : "", tv.m ? c.months[tv.m - 1] || "" : "", yr].filter(Boolean).join(" "); }
+function trange(t) { if (!t || !tvOk(t.from)) return ""; return tfmt(t.from) + (tvOk(t.to) ? " – " + tfmt(t.to) : ""); }
+/* interval of a time {from,to}: from start of the first to end of the last unit */
+function tspan(t) { if (!t || !tvOk(t.from)) return null; const a = tnum(t.from), b = tvOk(t.to) ? tnum(t.to, true) : tnum(t.from, true); return [a, Math.max(a, b)]; }
+
+/* a small editor for one time value */
+function timeInput(key, tv) {
+  const c = cal(); tv = tv || {};
+  return `<div class="tinput" data-ti="${key}"><input class="inp ty mono" type="number" step="1" value="${tvOk(tv) ? tv.y : ""}" placeholder="${esc(tl("rok"))}" aria-label="${esc(tl("rok"))}"><select class="inp tm" aria-label="${esc(tl("mesiac"))}"><option value="">${esc(tl("mesiac"))}</option>${c.months.map((m, i) => `<option value="${i + 1}"${tv.m === i + 1 ? " selected" : ""}>${esc(m)}</option>`).join("")}</select><input class="inp td mono" type="number" min="1" max="${c.mdays}" value="${tv.d || ""}" placeholder="${esc(tl("deň"))}" aria-label="${esc(tl("deň"))}"></div>`;
+}
+function readTime(box) { const y = $(".ty", box).value.trim(); if (y === "" || !isFinite(+y)) return null; const m = +$(".tm", box).value || undefined, d = m ? (+$(".td", box).value || undefined) : undefined; const c = cal(); return Object.assign({ y: Math.round(+y) }, m ? { m } : {}, d ? { d: Math.min(c.mdays, Math.max(1, d)) } : {}); }
+/* time editor for an object with .time = {from,to}; labels by kind */
+function timeLabels(cat) { return cat === "postava" ? ["Narodenie", "Smrť"] : cat === "udalost" ? ["Začiatok", "Koniec"] : cat === "krajina" || cat === "frakcia" || cat === "nabozenstvo" ? ["Vznik", "Zánik"] : cat === "scene" ? ["Kedy", "Do (ak trvá dlhšie)"] : ["Od", "Do"]; }
+function timeEditorHtml(obj, cat) {
+  const t = obj.time || {}, [a, b] = timeLabels(cat);
+  return `<div class="tedit"><div class="field"><span>${esc(tl(a))}</span>${timeInput("from", t.from)}</div><div class="field"><span>${esc(tl(b))} <small class="hint">${esc(tl("voliteľné"))}</small></span>${timeInput("to", t.to)}</div></div>`;
+}
+function bindTimeEditor(box, obj, save) {
+  const upd = () => { const from = readTime($('[data-ti="from"]', box)), to = readTime($('[data-ti="to"]', box)); if (from) obj.time = Object.assign({ from }, to ? { to } : {}); else delete obj.time; save(); };
+  const later = debounce(upd, 400);
+  $$(".tinput input, .tinput select", box).forEach(i => { i.addEventListener("input", later); i.addEventListener("change", upd); });
+}
+
+/* ---------- inspector and world entry extras ---------- */
+function inspExtras(el, n) {
+  const t = n.type === "text";
+  const tb = $("#iTime", el);
+  if (tb) {
+    if (t) { tb.innerHTML = `<span class="lbl">Čas deja</span>${timeEditorHtml(n, "scene")}<button class="lnk hint" id="iTl">${I.clock} ${esc(tl("Ukázať na časovej osi"))}</button>`; tb.insertAdjacentHTML("beforeend", `<div id="iAges">${dayInfoHtml(n.time)}${sceneAgesHtml(n)}</div>`); bindTimeEditor(tb, n, () => { saveProject(); const a = $("#iAges", tb); if (a) a.innerHTML = dayInfoHtml(n.time) + sceneAgesHtml(n); }); $("#iTl", tb).onclick = () => { TL.focus = { k: "scene", id: n.id }; setMode("time"); }; tb.insertAdjacentHTML("beforeend", nodeEventsHtml(n)); }
+    else { const h = nodeEventsHtml(n); if (h) tb.innerHTML = h; else tb.remove(); }
+    $$("[data-nev]", tb).forEach(b => b.onclick = () => openEnt(b.dataset.nev));
+  }
+  const bb = $("#iBeat", el);
+  if (bb) {
+    const pl = S.p.plot, P = pl && PLOTS[pl.tpl];
+    if (!P) bb.innerHTML = `<span class="lbl">Bod deja</span><button class="lnk hint" id="iPlot">${esc(tl("Vybrať šablónu deja (Save the Cat, Cesta hrdinu…)"))}</button>`;
+    else { const cur = Object.entries(pl.beats || {}).filter(([, v]) => v === n.id).map(([k]) => k); bb.innerHTML = `<label class="field"><span>Bod deja · ${esc(tl(P.n))}</span><select class="inp" id="iBeatSel"><option value="">${esc(tl("— žiadny —"))}</option>${P.beats.map((b, i) => `<option value="${b.id}"${cur.includes(b.id) ? " selected" : ""}>${i + 1}. ${esc(tl(b.n))}${pl.beats?.[b.id] && pl.beats[b.id] !== n.id ? " ✓" : ""}</option>`).join("")}</select></label>`; $("#iBeatSel", bb).onchange = ev => { pl.beats = pl.beats || {}; cur.forEach(k => delete pl.beats[k]); if (ev.target.value) pl.beats[ev.target.value] = n.id; saveProject(); if (S.mode === "write") { const c = $("#center"); const f = findNode(S.sel); if (c && f && f.n.type === "folder") renderCork(c, f.n); } }; }
+    $("#iPlot", bb)?.addEventListener("click", () => openTools("plot"));
+  }
+  const sb = $("#iSnaps", el);
+  if (sb) { if (t) mountSnaps(sb, n); else sb.remove(); }
+  mountNodeStory(el, n);
+}
+function entExtras(el, e) {
+  const tb = $("#eTime", el);
+  if (tb) {
+    if (e.cat === "mapa") tb.remove();
+    else { tb.innerHTML = `<h3>Na časovej osi${tvOk(e.time?.from) ? ` <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">${esc(trange(e.time))}</span>` : ""}<span class="spacer"></span><button class="btn sm ghost" id="eTl">${I.clock}${esc(tl("Časová os"))}</button></h3>${timeEditorHtml(e, e.cat)}<span class="hint">${esc(e.cat === "postava" ? tl("Postava sa na časovej osi ukáže s čiarou života a so scénami, v ktorých vystupuje.") : tl("Záznam s časom sa ukáže na časovej osi."))}</span>`; bindTimeEditor(tb, e, () => saveEnt(e.id)); $("#eTl", tb).onclick = () => { TL.focus = { k: "ent", id: e.id }; setMode("time"); }; if (e.cat === "postava") { const sa = charStoryAge(e); if (sa) tb.querySelector(":scope > .hint")?.insertAdjacentHTML("beforebegin", `<div class="storyage">${esc(sa)}</div>`); } tb.insertAdjacentHTML("beforeend", `<div id="eEvs"></div>`); mountEntEvents($("#eEvs", tb), e); }
+  }
+  const ab = $("#eArc", el);
+  if (ab) { if (e.cat === "postava") mountArc(ab, e); else ab.remove(); }
+}
+
+/* ---------- character arc ---------- */
+/* chapters for the arc = the folders that hold the scenes (a scene outside any folder stands alone),
+   so the arc follows the binder even when scenes sit directly in a part */
+function arcGroups() {
+  const out = [], by = new Map(), chapNo = new Map();
+  bookStructure().forEach(s => { if (s.type === "chapter" && s.node && !s.loose) chapNo.set(s.node.id, s.n); });
+  walk(S.p.binder, (n, parent) => {
+    if (n.type !== "text" || n.include === false) return;
+    const g = parent || n; let x = by.get(g.id);
+    if (!x) {
+      const kind = g.type === "text" ? "scene" : g.kind === "part" ? "part" : "chapter";
+      let up = null; if (kind !== "part") { let f = findNode(g.id); while (f && f.parent) { if (f.parent.kind === "part") { up = f.parent; break; } f = findNode(f.parent.id); } }
+      x = { node: g, title: g.title || tl("Bez názvu"), texts: [], n: chapNo.get(g.id) || null, part: kind === "part", kind, up, nums: [] }; by.set(g.id, x); out.push(x);
+    }
+    x.texts.push(n); if (x.part && chapNo.has(n.id)) x.nums.push(chapNo.get(n.id));
+  });
+  return out;
+}
+function presentIn(e, texts) { return texts.some(t => t.pov === e.id || (t.ents || []).includes(e.id) || mentions(e, S.items[t.id]?.html)); }
+const ARC_V = { "-5": "na dne", "-3": "zle", "0": "neutrálne", "3": "dobre", "5": "na vrchole" };
+function mountArc(el, e) {
+  const a = e.arc || {}, chs = arcGroups();
+  const all = !!el.dataset.all, rows = chs.map(s => ({ s, pov: (s.node.povs || []).includes(e.id), here: presentIn(e, s.texts) || (s.node.povs || []).includes(e.id), d: (a.ch || {})[s.node.id] })).filter(r => all || r.here || (r.d && (r.d.want || r.d.change || r.d.v !== undefined)));
+  const pts = rows.filter(r => r.d && r.d.v !== undefined && r.d.v !== null);
+  const W = 600, H = 90, X = i => 20 + i * (W - 40) / Math.max(1, rows.length - 1), Y = v => H / 2 - v * (H / 2 - 10) / 5;
+  const chart = pts.length >= 2 ? `<svg class="arcchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" class="ac-z"/><polyline points="${pts.map(r => X(rows.indexOf(r)).toFixed(1) + "," + Y(r.d.v).toFixed(1)).join(" ")}" class="ac-l"/>${pts.map(r => `<circle cx="${X(rows.indexOf(r)).toFixed(1)}" cy="${Y(r.d.v).toFixed(1)}" r="4" class="ac-p"><title>${esc(r.s.title)}: ${r.d.v}</title></circle>`).join("")}</svg>` : "";
+  el.innerHTML = `<h3>Oblúk postavy</h3>
+    <div class="fgrid">${[["want", "Čo chce (vonkajší cieľ)"], ["need", "Čo naozaj potrebuje"], ["lie", "Lož, ktorej verí"], ["truth", "Pravda, ku ktorej dospeje"]].map(([k, l]) => `<label class="field"><span>${esc(tl(l))}</span><textarea class="inp" rows="1" data-arc="${k}">${esc(a[k] || "")}</textarea></label>`).join("")}</div>
+    ${chart}
+    <div class="arcrows">${rows.map(r => { const d = r.d || {}; const lab = r.s.part ? "" : r.s.n ? chapLabel(r.s.n) : ""; const nums = r.s.nums;
+        const kb = `<span class="arck ${r.s.kind}">${esc(tl(r.s.kind === "part" ? "Časť" : r.s.kind === "scene" ? "Scéna" : "Kapitola"))}</span>${r.pov ? `<span class="badge soft">${esc(tl("pohľad postavy"))}</span>` : ""}`;
+        return `<div class="arcrow${r.here ? "" : " away"} k-${r.s.kind}" data-ach="${r.s.node.id}"><div class="ar-h">${kb}<b>${r.s.up ? `<span class="hint">${esc(r.s.up.title)} › </span>` : ""}${esc((lab ? lab + ": " : "") + r.s.title)}</b>${r.s.texts.length > 1 ? ` <small class="hint">${r.s.texts.length} ${plural(r.s.texts.length, "scéna", "scény", "scén")}</small>` : ""}${r.here ? "" : `<small class="hint">${esc(tl("nevystupuje"))}</small>`}</div>
+
+        <div class="ar-f"><label class="field"><span>${esc(tl("Čo chce / rieši"))}</span><textarea class="inp" rows="1" data-ak="want">${esc(d.want || "")}</textarea></label><label class="field"><span>${esc(tl("Čo sa zmenilo"))}</span><textarea class="inp" rows="1" data-ak="change">${esc(d.change || "")}</textarea></label>
+        <label class="field arv"><span>${esc(tl("Ako na tom je"))} <b class="mono" data-avl>${d.v === undefined || d.v === null ? "–" : (d.v > 0 ? "+" : "") + d.v}</b></span><input type="range" min="-5" max="5" step="1" value="${d.v ?? 0}" data-ak="v"${d.v === undefined || d.v === null ? ' class="unset"' : ""}><span class="ar-scale"><span>${esc(tl("na dne"))}</span><span>${esc(tl("na vrchole"))}</span></span></label></div></div>`; }).join("") || `<p class="hint">${esc(tl("Postava zatiaľ v žiadnej kapitole nevystupuje (ako rozprávač, priradená ani spomenutá v texte)."))}</p>`}</div>
+    <button class="btn sm ghost" id="arcAll">${all ? esc(tl("Len kapitoly, v ktorých vystupuje")) : esc(tl("Zobraziť všetky kapitoly"))}</button>`;
+  const sv = debounce(() => saveEnt(e.id), 500);
+  const arc = () => (e.arc = e.arc || {});
+  $$("[data-arc]", el).forEach(t => { autoGrow(t); t.oninput = () => { arc()[t.dataset.arc] = t.value; autoGrow(t); sv(); }; });
+  $$("[data-ach]", el).forEach(row => {
+    const id = row.dataset.ach, d = () => { const A = arc(); A.ch = A.ch || {}; return A.ch[id] = A.ch[id] || {}; };
+    $$("textarea[data-ak]", row).forEach(t => { autoGrow(t); t.oninput = () => { d()[t.dataset.ak] = t.value; autoGrow(t); sv(); }; });
+    const r = $('input[data-ak="v"]', row); r.oninput = () => { d().v = +r.value; r.classList.remove("unset"); $("[data-avl]", row).textContent = (r.value > 0 ? "+" : "") + r.value; sv(); };
+    r.onchange = () => mountArc(el, e);
+  });
+  $("#arcAll", el).onclick = () => { if (el.dataset.all) delete el.dataset.all; else el.dataset.all = "1"; mountArc(el, e); };
+}
+
+/* ---------- plot templates ---------- */
+const PLOTS = {
+  three: { n: "Trojaktová štruktúra", beats: [
+    { id: "setup", n: "Expozícia", at: 0, d: "Bežný svet hrdinu – kto je, čo chce a čo mu chýba." },
+    { id: "inciting", n: "Podnet", at: .1, d: "Udalosť, ktorá naruší bežný svet a rozbehne príbeh." },
+    { id: "pp1", n: "1. bod zlomu", at: .25, d: "Hrdina sa rozhodne a vstúpi do 2. dejstva – niet cesty späť." },
+    { id: "mid", n: "Stred príbehu", at: .5, d: "Zvrat, odhalenie alebo falošné víťazstvo; hrdina zmení prístup." },
+    { id: "pp2", n: "2. bod zlomu", at: .75, d: "Najhorší okamih – zdá sa, že je všetko stratené." },
+    { id: "climax", n: "Vyvrcholenie", at: .9, d: "Rozhodujúci stret, v ktorom sa ukáže, kým sa hrdina stal." },
+    { id: "end", n: "Rozuzlenie", at: .97, d: "Nový svet po príbehu." }] },
+  stc: { n: "Save the Cat (Blake Snyder)", beats: [
+    { id: "open", n: "Úvodný obraz", at: 0, d: "Momentka sveta a hrdinu pred zmenou." },
+    { id: "theme", n: "Vyslovenie témy", at: .05, d: "Niekto nahlas povie, čo sa hrdina musí naučiť." },
+    { id: "setup", n: "Predstavenie", at: .06, d: "Svet, postavy, čo hrdinovi chýba a čo by bolo treba napraviť." },
+    { id: "cat", n: "Katalyzátor", at: .1, d: "Udalosť, ktorá všetko zmení." },
+    { id: "debate", n: "Váhanie", at: .15, d: "Hrdina zvažuje, či sa do toho pustí." },
+    { id: "two", n: "Vstup do 2. dejstva", at: .2, d: "Rozhodnutie – hrdina vstupuje do nového sveta." },
+    { id: "b", n: "Vedľajšia línia (B)", at: .22, d: "Nový vzťah, cez ktorý sa rozvíja téma." },
+    { id: "fun", n: "Zábava a hry", at: .3, d: "Sľub premisy – to, kvôli čomu čitateľ knihu otvoril." },
+    { id: "mid", n: "Stred", at: .5, d: "Falošné víťazstvo alebo falošná porážka; stávky stúpajú." },
+    { id: "bad", n: "Zlí sa približujú", at: .62, d: "Vonkajší tlak rastie, tím sa rozpadá." },
+    { id: "lost", n: "Všetko je stratené", at: .75, d: "Najhorší moment, často „vôňa smrti“." },
+    { id: "dark", n: "Temná noc duše", at: .78, d: "Hrdina na dne pochopí, čo musí zmeniť." },
+    { id: "three", n: "Vstup do 3. dejstva", at: .8, d: "Nový nápad, spojenie A a B línie." },
+    { id: "finale", n: "Finále", at: .88, d: "Hrdina uplatní, čo sa naučil, a porazí zlo." },
+    { id: "final", n: "Záverečný obraz", at: .99, d: "Zrkadlo úvodného obrazu – dôkaz zmeny." }] },
+  hero: { n: "Cesta hrdinu (Vogler)", beats: [
+    { id: "ordinary", n: "Bežný svet", at: 0, d: "Hrdina vo svojom prostredí, ešte nezmenený." },
+    { id: "call", n: "Volanie k dobrodružstvu", at: .08, d: "Problém alebo výzva, ktorá ho vytrhne z pohodlia." },
+    { id: "refusal", n: "Odmietnutie výzvy", at: .12, d: "Strach, pochybnosti, váhanie." },
+    { id: "mentor", n: "Stretnutie s mentorom", at: .17, d: "Rada, dar alebo výcvik od niekoho skúsenejšieho." },
+    { id: "threshold", n: "Prekročenie prahu", at: .25, d: "Vstup do neznámeho sveta." },
+    { id: "tests", n: "Skúšky, spojenci, nepriatelia", at: .32, d: "Hrdina sa učí pravidlá nového sveta." },
+    { id: "approach", n: "Priblíženie k najhlbšej jaskyni", at: .42, d: "Príprava na najväčšie nebezpečenstvo." },
+    { id: "ordeal", n: "Rozhodujúca skúška", at: .5, d: "Stret so smrťou alebo s najväčším strachom." },
+    { id: "reward", n: "Odmena", at: .6, d: "Hrdina získa, po čo prišiel." },
+    { id: "back", n: "Cesta späť", at: .75, d: "Návrat, prenasledovanie, následky." },
+    { id: "resurrection", n: "Vzkriesenie", at: .88, d: "Posledná a najťažšia skúška; hrdina sa premení." },
+    { id: "elixir", n: "Návrat s elixírom", at: .97, d: "Hrdina prináša domov niečo, čo zmení jeho svet." }] },
+  seven: { n: "Sedembodová štruktúra (Dan Wells)", beats: [
+    { id: "hook", n: "Háčik", at: 0, d: "Východiskový stav – opak konca." },
+    { id: "turn1", n: "1. zvrat", at: .15, d: "Udalosť, ktorá uvedie konflikt do pohybu." },
+    { id: "pinch1", n: "1. zovretie", at: .35, d: "Tlak protivníka – hrdina musí konať." },
+    { id: "mid", n: "Stred", at: .5, d: "Hrdina prejde od reakcie k akcii." },
+    { id: "pinch2", n: "2. zovretie", at: .62, d: "Ďalší úder; plán zlyhá, hrdina ostane sám." },
+    { id: "turn2", n: "2. zvrat", at: .85, d: "Hrdina získa posledný kúsok, ktorý potrebuje na víťazstvo." },
+    { id: "res", n: "Rozuzlenie", at: .98, d: "Koniec, ku ktorému všetko smerovalo." }] },
+};
+/* position of every scene and chapter in the book as a share 0–1 (by words) */
+function bookPositions(basisTotal) {
+  const pos = {}, list = [], tw = Math.max(1, totalWords()), T = basisTotal || tw; let acc = 0;
+  walk(S.p.binder, n => { if (n.include === false) return; if (n.type === "text") { pos[n.id] = acc / T; acc += n.words || 0; } });
+  walk(S.p.binder, n => { if (n.type === "folder") { const t = allTexts(n.children || []).find(x => x.id in pos); if (t) pos[n.id] = pos[t.id]; } });
+  bookStructure().forEach(s => { if (s.type === "chapter") { const first = s.texts.find(x => x.id in pos); const w = s.texts.reduce((a, x) => a + (x.words || 0), 0); list.push({ s, at: first ? pos[first.id] : 0, w: w / T }); } });
+  return { pos, chapters: list, total: tw };
+}
+function renderPlotTool(pg) {
+  const p = S.p, pl = p.plot || {}, P = PLOTS[pl.tpl], goal = +(p.goals?.total) || 0, tw = totalWords();
+  const basis = pl.basis || (goal && tw < goal * .8 ? "goal" : "text"), T = basis === "goal" && goal ? goal : tw;
+  const { pos, chapters } = bookPositions(T), here = basis === "goal" && goal ? Math.min(1, tw / goal) : null;
+  const nodeOpts = sel => { const o = []; walk(p.binder, (n, par, i, d) => { if (n.include === false) return; o.push(`<option value="${n.id}"${sel === n.id ? " selected" : ""}>${"  ".repeat(d)}${esc(n.title || tl("Bez názvu"))}</option>`); }); return o.join(""); };
+  const pc = v => Math.round(v * 100) + " %";
+  pg.innerHTML = `<h2 class="tp-h">Štruktúra deja</h2>
+    <div class="card"><div class="fgrid"><label class="field"><span>Šablóna</span><select class="inp" id="plTpl"><option value="">${esc(tl("— bez šablóny —"))}</option>${Object.entries(PLOTS).map(([k, v]) => `<option value="${k}"${pl.tpl === k ? " selected" : ""}>${esc(v.n)}</option>`).join("")}</select></label>
+      ${P ? `<label class="field"><span>Pozície počítať podľa</span><select class="inp" id="plBasis">${goal ? `<option value="goal"${basis === "goal" ? " selected" : ""}>${esc(tl("cieľa knihy ({x} slov)").replace("{x}", nf(goal)))}</option>` : ""}<option value="text"${basis === "text" ? " selected" : ""}>${esc(tl("napísaného textu ({x} slov)").replace("{x}", nf(tw)))}</option></select></label>` : ""}</div>
+      ${P ? "" : `<p class="hint">Vyber si kostru príbehu. Ku každému bodu priradíš scénu alebo kapitolu a uvidíš, či sú na správnom mieste knihy – a kde práve si.</p>`}</div>
+    ${P ? `<div class="plotbar"><div class="pb-ch">${chapters.map((c, i) => `<span class="pb-c${i % 2 ? " alt" : ""}" style="left:${(c.at * 100).toFixed(2)}%;width:${Math.max(.3, c.w * 100).toFixed(2)}%" title="${esc(c.s.title)}"></span>`).join("")}${here !== null ? `<span class="pb-here" style="left:${(here * 100).toFixed(2)}%" title="${esc(tl("Tu si"))}"><i>${esc(tl("Tu si"))}</i></span>` : ""}</div>
+        <div class="pb-ideal">${P.beats.map((b, i) => `<span style="left:${(b.at * 100).toFixed(2)}%" title="${esc(tl(b.n))} · ${pc(b.at)}">${i + 1}</span>`).join("")}</div>
+        <div class="pb-real">${P.beats.map((b, i) => { const id = pl.beats?.[b.id]; return id && id in pos ? `<span style="left:${(pos[id] * 100).toFixed(2)}%" title="${esc(tl(b.n))}">${I.beat}</span>` : ""; }).join("")}</div>
+        <div class="pb-leg"><span><i class="lg-i"></i>${esc(tl("ideálne miesto"))}</span><span><i class="lg-r">${I.beat}</i>${esc(tl("tvoja scéna"))}</span>${here !== null ? `<span><i class="lg-h"></i>${esc(tl("Tu si"))} · ${pc(here)}</span>` : ""}</div></div>
+      <div class="beats">${P.beats.map((b, i) => { const id = pl.beats?.[b.id], at = id in pos ? pos[id] : null, off = at === null ? null : at - b.at;
+        const stt = at === null ? (here !== null && here > b.at + .03 ? `<span class="badge warn">${esc(tl("zatiaľ chýba – už by mal byť za tebou"))}</span>` : here !== null && here > b.at - .06 ? `<span class="badge soft">${esc(tl("blíži sa"))}</span>` : "") : here !== null ? `<span class="badge ok">✓ ${esc(tl("začína na {x}. slove").replace("{x}", nf(Math.round(at * T))))}</span>` : Math.abs(off) <= .07 ? `<span class="badge ok">✓ ${pc(at)}</span>` : `<span class="badge warn">${pc(at)} · ${off > 0 ? esc(tl("neskôr o {x}")).replace("{x}", pc(off)) : esc(tl("skôr o {x}")).replace("{x}", pc(-off))}</span>`;
+        return `<div class="beatrow${at !== null ? " set" : ""}"><span class="bn">${i + 1}</span><div class="bt"><b>${esc(tl(b.n))}</b> <span class="hint">${pc(b.at)}${T ? " · ≈ " + nf(Math.round(b.at * T / 100) * 100) + " " + tl("sl.") : ""}</span><div class="hint">${esc(tl(b.d))}</div></div><div class="bs"><select class="inp" data-beat="${b.id}"><option value="">${esc(tl("Priradiť scénu…"))}</option>${nodeOpts(id)}</select>${stt}</div></div>`; }).join("")}</div>
+      <p class="hint">Percentá sú orientačné – šablóna je pomôcka, nie zákon. Body deja vidíš aj na nástenke kapitol a v inšpektore scény.</p>` : ""}`;
+  $("#plTpl", pg).onchange = ev => { if (ev.target.value) p.plot = Object.assign({ beats: {} }, p.plot || {}, { tpl: ev.target.value }); else delete p.plot; saveProject(); renderPlotTool(pg); };
+  $("#plBasis", pg)?.addEventListener("change", ev => { p.plot.basis = ev.target.value; saveProject(); renderPlotTool(pg); });
+  $$("[data-beat]", pg).forEach(s => s.onchange = () => { p.plot.beats = p.plot.beats || {}; if (s.value) p.plot.beats[s.dataset.beat] = s.value; else delete p.plot.beats[s.dataset.beat]; saveProject(); renderPlotTool(pg); });
+}
+function beatBadges(nodeId) {
+  const pl = S.p?.plot, P = pl && PLOTS[pl.tpl]; if (!P) return "";
+  return P.beats.map((b, i) => pl.beats?.[b.id] === nodeId ? `<span class="beatb" title="${esc(tl(P.n))}">${I.beat}${esc(tl(b.n))}</span>` : "").join("");
+}
+
+/* ---------- own events of a world entry: e.evs = [{id, t, when?, time?, at: [nodeId]}]
+   linked to chapters or scenes; chapters may be flashbacks, so the order is never checked ---------- */
+const EV = { edit: null };
+function evNodeLabel(id) {
+  const f = findNode(id); if (!f) return null; const n = f.n;
+  if (n.type === "text") return sceneTitleFull(n);
+  const s = bookStructure().find(x => x.type === "chapter" && !x.loose && x.node === n);
+  return s ? (chapLabel(s.n) ? chapLabel(s.n) + ": " : s.n + ". ") + (n.title || tl("Bez názvu")) : n.title || tl("Bez názvu");
+}
+function evOptions() {
+  return bookStructure().filter(s => s.type === "chapter").map(s => {
+    if (s.loose) return `<optgroup label="${esc(s.node.title || tl("Bez názvu"))}">${s.texts.map(t => `<option value="${t.id}">${esc(t.title || tl("Bez názvu"))}</option>`).join("")}</optgroup>`;
+    const lab = (chapLabel(s.n) ? chapLabel(s.n) + ": " : s.n + ". ") + (s.title || tl("Bez názvu"));
+    if (s.node.type === "text") return `<option value="${s.node.id}">${esc(lab)}</option>`;
+    return `<optgroup label="${esc(lab)}"><option value="${s.node.id}">${esc(tl("Celá kapitola"))}</option>${s.texts.map(t => `<option value="${t.id}">${esc(t.title || tl("Bez názvu"))}</option>`).join("")}</optgroup>`;
+  }).join("");
+}
+const evWhen = v => [v.when, trange(v.time)].filter(Boolean).join(" · ");
+const evAt = v => (v.at || []).filter(id => findNode(id));
+/* all own events of all entries, for the timeline and the scene inspector */
+function allEntEvents() { const out = []; Object.values(S.ents).forEach(e => (e.evs || []).forEach(v => out.push({ e, v }))); return out; }
+function evGoNode(id) { const f = findNode(id); if (!f) return; if (f.parent) setOpen(f.parent, true); S.tool = null; S.sel = id; setMode("write"); }
+function mountEntEvents(box, e) {
+  const list = e.evs || [];
+  const formHtml = v => `<div class="relform evform"><label class="field"><span>${esc(tl("Čo sa stalo"))}</span><input class="inp" data-evt value="${esc(v.t || "")}" placeholder="${esc(tl("napr. Veľký požiar, korunovácia, útek z väzenia"))}" autocomplete="off"></label>
+      ${relTimeFields(v)}
+      <div class="field"><span>${esc(tl("Prepojiť s kapitolou alebo scénou"))} <small class="hint">${esc(tl("voliteľné – aj spätný pohľad"))}</small></span><div class="chips" data-evat>${evAt(v).map(id => `<span class="chip">${esc(evNodeLabel(id))}<button class="x" data-evrm="${id}" aria-label="${esc(tl("Odobrať"))}">×</button></span>`).join("")}</div><select class="inp" data-evadd><option value="">${esc(tl("+ pridať kapitolu alebo scénu…"))}</option>${evOptions()}</select></div>
+      <div class="btnrow"><button class="btn sm primary" data-evsave>${esc(tl("Uložiť"))}</button>${v.id ? `<button class="btn sm ghost danger" data-evdel>${esc(tl("Zmazať"))}</button>` : ""}<span class="spacer"></span><button class="btn sm ghost" data-evcancel>${esc(tl("Zrušiť"))}</button></div></div>`;
+  const rowHtml = v => `<div class="evrow"><div class="evm"><b class="no-tr">${esc(v.t || tl("Bez názvu"))}</b>${evWhen(v) ? ` <span class="hint no-tr">${esc(evWhen(v))}</span>` : ""}${evAt(v).length ? `<div class="chips">${evAt(v).map(id => `<button class="chip link" data-evgo="${id}">${I.doc}${esc(evNodeLabel(id))}</button>`).join("")}</div>` : ""}</div><button class="btn sm ghost" data-evedit="${v.id}">${esc(tl("Upraviť"))}</button></div>`;
+  const draft = EV.edit && EV.edit.ent === e.id ? EV.edit : null;
+  box.innerHTML = `<div class="lbl evlbl">${esc(tl("Vlastné udalosti"))}</div>
+    ${list.map(v => draft && draft.v.id === v.id ? formHtml(draft.v) : rowHtml(v)).join("") || (draft ? "" : `<p class="hint">${esc(tl("Čo sa tu stalo – aj dávno pred dejom knihy. Udalosť môžeš prepojiť s kapitolou, kde sa o nej píše."))}</p>`)}
+    ${draft && !draft.v.id ? formHtml(draft.v) : `<button class="btn sm" data-evnew>${I.plus}${esc(tl("Pridať udalosť"))}</button>`}`;
+  const again = () => mountEntEvents(box, e);
+  $("[data-evnew]", box)?.addEventListener("click", () => { EV.edit = { ent: e.id, v: { t: "", at: [] } }; again(); $("[data-evt]", box)?.focus(); });
+  $$("[data-evedit]", box).forEach(b => b.onclick = () => { const v = list.find(x => x.id === b.dataset.evedit); EV.edit = { ent: e.id, v: JSON.parse(JSON.stringify(v)) }; again(); });
+  $$("[data-evgo]", box).forEach(b => b.onclick = () => evGoNode(b.dataset.evgo));
+  const f = $(".evform", box); if (!f || !draft) return;
+  const keep = () => { draft.v.t = $("[data-evt]", f).value; readRelTime(f, draft.v); };
+  $("[data-evadd]", f).onchange = ev => { const id = ev.target.value; if (!id) return; keep(); draft.v.at = [...new Set([...(draft.v.at || []), id])]; again(); };
+  $$("[data-evrm]", f).forEach(b => b.onclick = () => { keep(); draft.v.at = (draft.v.at || []).filter(x => x !== b.dataset.evrm); again(); });
+  $("[data-evcancel]", f).onclick = () => { EV.edit = null; again(); };
+  $("[data-evdel]", f)?.addEventListener("click", () => { e.evs = list.filter(x => x.id !== draft.v.id); if (!e.evs.length) delete e.evs; EV.edit = null; saveEnt(e.id); again(); });
+  $("[data-evsave]", f).onclick = () => {
+    keep(); const v = draft.v; v.t = v.t.trim();
+    if (!v.t) { toast(tl("Napíš, čo sa stalo.")); $("[data-evt]", f).focus(); return; }
+    v.at = evAt(v); if (!v.at.length) delete v.at;
+    if (v.id) { const i = list.findIndex(x => x.id === v.id); list[i] = v; } else { v.id = uid("ev"); e.evs = [...list, v]; }
+    if (!e.evs) e.evs = list;
+    EV.edit = null; saveEnt(e.id); again();
+  };
+}
+/* in the scene / chapter inspector: own events of the world linked here */
+function nodeEventsHtml(n) {
+  const ids = new Set([n.id]); const f = findNode(n.id); if (f && f.parent) ids.add(f.parent.id);
+  const hits = allEntEvents().filter(x => (x.v.at || []).some(id => ids.has(id)));
+  if (!hits.length) return "";
+  return `<div class="nevs"><span class="lbl">${esc(tl("Udalosti zo Sveta"))}</span>${hits.map(x => `<button class="nev" data-nev="${x.e.id}"><b class="no-tr">${esc(x.v.t)}</b> <span class="hint no-tr">${esc(x.e.name)}${evWhen(x.v) ? " · " + esc(evWhen(x.v)) : ""}</span></button>`).join("")}</div>`;
+}
+
+/* ---------- timeline ---------- */
+const TL = { view: null, show: { scenes: true, events: true }, pick: new Map(), pid: null, chars: new Set(), sel: null, focus: null, side: "warn", mode: (() => { try { return localStorage.getItem("kronikar:tlmode") || "lanes"; } catch { return "lanes"; } })(), split: (() => { try { return localStorage.getItem("kronikar:tlsplit") === "1"; } catch { return false; } })() };
+/* ---------- the axis view: one line (or one per kind) with a mark per month / year ---------- */
+const TLA_LANES = [["dej", "Kapitoly", "var(--accent)"], ["udal", "Udalosti", "#C0812A"], ["post", "Postavy", "#2F6FA8"]];
+function tlItems(D) {
+  const out = [], chOk = id => TL.chars.has(id);
+  D.scenes.forEach(s => { if (!s.sp) return; const n = s.n; out.push({ lane: "dej", sp: s.sp, k: "scene", id: n.id, t: n.title || tl("Bez názvu"), sub: [sceneChapterTitle(n), n.place && S.ents[n.place] ? S.ents[n.place].name : ""].filter(Boolean).join(" · "), who: D.chars.filter(c => D.present[c.id].includes(n.id)).map(c => c.id), time: n.time, col: (n.pov && D.color[n.pov]) || "var(--accent)" }); });
+  Object.values(S.ents).forEach(e => {
+    if (e.cat === "mapa") return; const isC = e.cat === "postava";
+    if (isC && !chOk(e.id)) return;
+    const col = isC ? D.color[e.id] : cssCol(catColor(e.cat));
+    if (tspan(e.time)) {
+      if (isC) { const b = e.time.from; out.push({ lane: "post", sp: [tnum(b), tnum(b, true)], k: "ent", id: e.id, t: tl("Narodenie: {x}", e.name), time: { from: b }, col }); if (tvOk(e.time.to)) { const d = e.time.to; out.push({ lane: "post", sp: [tnum(d), tnum(d, true)], k: "ent", id: e.id, t: tl("Smrť: {x}", e.name), time: { from: d }, col }); } }
+      else out.push({ lane: "udal", sp: tspan(e.time), k: "ent", id: e.id, t: e.name, sub: CAT[e.cat]?.one || "", time: e.time, col });
+    }
+    (e.evs || []).forEach(v => { const sp = tspan(v.time); if (sp) out.push({ lane: isC ? "post" : "udal", sp, k: "ent", id: e.id, t: v.t, sub: e.name + (v.when ? " · " + v.when : ""), at: evAt(v), time: v.time, col }); });
+  });
+  (S.p.links || []).forEach(l => { const A = S.ents[l.a], B = S.ents[l.b], sp = tspan(l.time); if (!A || !B || !sp) return; const c = A.cat === "postava" ? A : B.cat === "postava" ? B : null; if (c && !chOk(c.id)) return; out.push({ lane: c ? "post" : "udal", sp, k: "ent", id: c ? c.id : A.id, t: `${A.name} – ${l.label} – ${B.name}`, sub: l.when || "", time: l.time, col: c ? D.color[c.id] : cssCol(catColor(A.cat)) }); });
+  return out.filter(it => (it.lane !== "dej" || TL.show.scenes) && (it.lane !== "udal" || TL.show.events));
+}
+/* bucket size: a month at most (never days), growing to years, decades… when zoomed out */
+function tlaUnit(k) { const M = cal().months.length; return [1 / M, 1, 10, 100, 1000, 10000, 100000].find(u => u * k >= 12) || 100000; }
+function tlaLabel(b, u) {
+  const c = cal(), M = c.months.length, t = b * u, era = c.era ? " " + c.era : "";
+  if (u < 1) { const y = Math.floor(t + 1e-9), m = Math.round((t - y) * M) + 1; return (c.months[m - 1] || m) + " " + y + era; }
+  if (u === 1) return Math.round(t) + era;
+  return Math.round(t) + " – " + Math.round(t + u - 1) + era;
+}
+const tlaKey = (lane, b, u) => lane + "|" + b + "|" + u;
+
+const TL_COLORS = ["#C0563A", "#2F6FA8", "#3E7B3A", "#8E3550", "#C0812A", "#6B5BB5", "#2F8F83", "#7A5C3A", "#A04BB0", "#4F6B7E"];
+function tlData() {
+  const scenes = allTexts().map(n => ({ n, sp: tspan(n.time), povs: nodePovs(n) }));
+  const chars = entsBy("postava");
+  const color = {}; chars.forEach((c, i) => color[c.id] = TL_COLORS[i % TL_COLORS.length]);
+  const present = {}; chars.forEach(c => { present[c.id] = scenes.filter(s => s.n.pov === c.id || s.povs.includes(c.id) || (s.n.ents || []).includes(c.id) || mentions(c, S.items[s.n.id]?.html)).map(s => s.n.id); });
+  const events = Object.values(S.ents).filter(e => e.cat !== "postava" && e.cat !== "mapa" && tspan(e.time)).map(e => ({ e, sp: tspan(e.time) }));
+  /* own events of entries: on the character's lane for characters, otherwise among world events */
+  allEntEvents().forEach(({ e, v }) => { const sp = tspan(v.time); if (sp && e.cat !== "postava") events.push({ e, v, sp }); });
+  /* problems: two places at once, appearing before birth or after death */
+  const warns = [], ign = new Set(S.p.tlIgnore || []);
+  chars.forEach(c => {
+    const life = tspan(c.time), list = scenes.filter(s => s.sp && present[c.id].includes(s.n.id));
+    list.forEach(s => {
+      if (life && c.time.from && s.sp[1] < life[0]) warns.push({ key: "b:" + c.id + ":" + s.n.id, c, a: s.n, txt: tl("{x} vystupuje v scéne pred svojím narodením.").replace("{x}", c.name) });
+      if (life && tvOk(c.time.to) && s.sp[0] > life[1]) warns.push({ key: "d:" + c.id + ":" + s.n.id, c, a: s.n, txt: tl("{x} vystupuje v scéne po svojej smrti.").replace("{x}", c.name) });
+    });
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const A = list[i], B = list[j];
+      if (!A.n.place || !B.n.place || A.n.place === B.n.place) continue;
+      if (A.sp[0] <= B.sp[1] && B.sp[0] <= A.sp[1]) warns.push({ key: "p:" + c.id + ":" + [A.n.id, B.n.id].sort().join(":"), c, a: A.n, b: B.n, txt: tl("{x} je v rovnakom čase na dvoch miestach: {y} a {z}.").replace("{x}", c.name).replace("{y}", S.ents[A.n.place]?.name || "?").replace("{z}", S.ents[B.n.place]?.name || "?") });
+    }
+  });
+  return { scenes, chars, color, present, events, warns: warns.filter(w => !ign.has(w.key)), ignored: warns.filter(w => ign.has(w.key)).length };
+}
+function tlTicks(t0, t1, k) {
+  const c = cal(), Y = c.months.length * c.mdays, steps = [];
+  [1, 2, 5, 10, 15].forEach(d => { if (d < c.mdays) steps.push({ u: d / Y, kind: "d", n: d }); });
+  [1, 2, 3, 6].forEach(m => { if (m < c.months.length) steps.push({ u: m * c.mdays / Y, kind: "m", n: m }); });
+  [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000, 10000].forEach(y => steps.push({ u: y, kind: "y", n: y }));
+  const st = steps.find(s => s.u * k >= 80) || steps[steps.length - 1], out = [];
+  let t = Math.floor(t0 / st.u) * st.u;
+  for (let i = 0; t <= t1 && i < 400; i++, t += st.u) {
+    const y = Math.floor(t + 1e-9), rem = Math.round((t - y) * Y), m = Math.floor(rem / c.mdays) + 1, d = rem % c.mdays + 1;
+    out.push({ t, lab: st.kind === "y" ? String(y) + (c.era ? " " + c.era : "") : st.kind === "m" ? (c.months[m - 1] || m) + " " + y : d + ". " + (c.months[m - 1] || m) + (d === 1 ? " " + y : ""), major: st.kind === "y" ? y % (st.n * 5) === 0 : st.kind === "m" ? m === 1 : d === 1 });
+  }
+  return out;
+}
+function pack(items) { const rows = []; items.sort((a, b) => a.x0 - b.x0).forEach(it => { let r = rows.findIndex(end => end < it.x0 - 4); if (r < 0) { r = rows.length; rows.push(0); } rows[r] = it.x1; it.row = r; }); return rows.length; }
+function renderBucket(side, D, key, main, go) {
+  const [lane, bs, us] = key.split("|"), b = +bs, u = +us, t0 = b * u, t1 = t0 + u;
+  const items = tlItems(D).filter(it => lane === "all" || it.lane === lane);
+  const here = items.filter(it => Math.floor(it.sp[0] / u + 1e-9) === b).sort((p, q) => p.sp[0] - q.sp[0]);
+  const ongoing = items.filter(it => it.sp[0] < t0 - 1e-9 && it.sp[1] >= t0);
+  const keys = [...new Set(items.map(it => Math.floor(it.sp[0] / u + 1e-9)))].sort((p, q) => p - q), i = keys.indexOf(b);
+  const row = it => `<div class="tla-row"><i style="background:${it.col}"></i><div><button class="lnk" data-tago="${it.k}|${it.id}"><b class="no-tr">${esc(it.t)}</b></button>${it.sub ? `<small class="hint no-tr">${esc(it.sub)}</small>` : ""}<small class="hint">${esc(trange(it.time))}</small>${(it.who || []).length ? `<div class="chips">${it.who.map(id => `<button class="chip link" data-tago="ent|${id}"><i class="dot" style="background:${D.color[id]}"></i>${esc(S.ents[id].name)}</button>`).join("")}</div>` : ""}${(it.at || []).length ? `<div class="chips">${it.at.map(id => `<button class="chip link" data-tago="scene|${id}">${I.doc}${esc(evNodeLabel(id))}</button>`).join("")}</div>` : ""}</div></div>`;
+  const byLane = list => (lane === "all" ? TLA_LANES : TLA_LANES.filter(L => L[0] === lane)).map(([l, lab, c]) => { const xs = list.filter(it => it.lane === l); return xs.length ? `${lane === "all" ? `<div class="lbl tla-k"><i style="background:${c}"></i>${esc(tl(lab))}</div>` : ""}${xs.map(row).join("")}` : ""; }).join("");
+  side.innerHTML = `<div class="tla-head"><button class="btn icon sm" data-tab="-1"${i > 0 ? "" : " disabled"} aria-label="${esc(tl("Predchádzajúce"))}">‹</button><b>${esc(tlaLabel(b, u))}</b><button class="btn icon sm" data-tab="1"${i >= 0 && i < keys.length - 1 ? "" : " disabled"} aria-label="${esc(tl("Ďalšie"))}">›</button></div>
+    ${here.length ? byLane(here) : `<p class="hint">${esc(tl("V tomto čase nie je nič zaznačené."))}</p>`}
+    ${ongoing.length ? `<details class="tla-on"><summary>${esc(tl("Ešte prebieha ({x})", ongoing.length))}</summary>${byLane(ongoing)}</details>` : ""}`;
+  $$("[data-tab]", side).forEach(btn => btn.onclick = () => { const nb = keys[i + +btn.dataset.tab]; if (nb === undefined) return; TL.sel = { k: "bucket", id: tlaKey(lane, nb, u) }; const w = $("#tlView", main)?.clientWidth || 600, LABW = innerWidth < 700 ? 92 : 150, x = (nb + .5) * u; if (TL.view) { const vx = LABW + (x - TL.view.t0) * TL.view.k; if (vx < LABW + 20 || vx > w - 20) TL.view.t0 = x - (w - LABW) / 2 / TL.view.k; } renderTimeline(main); });
+  $$("[data-tago]", side).forEach(btn => btn.onclick = () => { const [k, id] = btn.dataset.tago.split("|"); go(k, id); });
+}
+function renderTimeline(main) {
+  /* times on a character's lane besides the life line: own events and relationships with a time */
+  const charSpans = c => [...(c.evs || []).map(v => tspan(v.time)), ...(S.p.links || []).filter(l => (l.a === c.id || l.b === c.id) && S.ents[l.a] && S.ents[l.b]).map(l => tspan(l.time))].filter(Boolean);
+  const D = tlData(), all = [...D.scenes.filter(s => s.sp).map(s => s.sp), ...D.events.map(x => x.sp), ...D.chars.map(c => tspan(c.time)).filter(Boolean), ...D.chars.flatMap(charSpans)];
+  /* which characters are shown: own choice if made, otherwise everyone who has something on the timeline – recomputed every time, so new data shows up */
+  if (TL.pid !== S.p.id) { TL.pid = S.p.id; TL.pick = new Map(); TL.view = null; TL.sel = null; }
+  const hasData = c => !!(tspan(c.time) || charSpans(c).length || D.present[c.id].some(id => D.scenes.find(s => s.n.id === id)?.sp));
+  TL.chars = new Set(D.chars.filter(c => TL.pick.has(c.id) ? TL.pick.get(c.id) : hasData(c)).map(c => c.id));
+  const noTimeScenes = D.scenes.filter(s => !s.sp), noTimeEnts = Object.values(S.ents).filter(e => (e.cat === "postava" || e.cat === "udalost") && !tspan(e.time));
+  const noTimeEvs = allEntEvents().filter(x => !tspan(x.v.time));
+  main.innerHTML = `<div class="tl" style="flex:1">
+    <div class="tl-bar">
+      <div class="segs"><button class="seg${TL.show.scenes ? " on" : ""}" data-tls="scenes">${I.doc}<span>Dej</span></button><button class="seg${TL.show.events ? " on" : ""}" data-tls="events">${I.beat}<span>Udalosti</span></button></div>
+      <details class="tl-chars"><summary class="btn sm">${I.globe}<span>${esc(tl("Postavy"))} (${[...TL.chars].filter(id => S.ents[id]).length})</span></summary><div class="tl-cpop">${D.chars.map(c => `<label class="chk"><input type="checkbox" data-tlc="${c.id}"${TL.chars.has(c.id) ? " checked" : ""}><i style="background:${D.color[c.id]}"></i>${esc(c.name)}</label>`).join("") || `<span class="hint">${esc(tl("Vo Svete zatiaľ nie sú postavy."))}</span>`}</div></details>
+      <span class="spacer"></span>
+      <button class="btn icon" data-tlz="out" aria-label="Oddialiť" title="Oddialiť">−</button><button class="btn icon" data-tlz="in" aria-label="Priblížiť" title="Priblížiť">${I.plus}</button><button class="btn icon" data-tlz="fit" aria-label="Celá os" title="Celá os">${I.fit}</button><button class="btn sm" data-tlz="story" title="Priblížiť na dej knihy">${I.doc}<span>${esc(tl("Dej knihy"))}</span></button>
+      <button class="btn sm" id="tlRefresh" title="${esc(tl("Načítať znova a ukázať všetko"))}">↻<span>${esc(tl("Obnoviť"))}</span></button>
+      <button class="btn sm" id="tlCal">${esc(tl("Kalendár"))}</button>
+      <div class="segs small tl-modes"><button class="seg${TL.mode === "lanes" ? " on" : ""}" data-tlm="lanes">${esc(tl("Pruhy"))}</button><button class="seg${TL.mode === "axis" ? " on" : ""}" data-tlm="axis">${esc(tl("Os"))}</button></div>${TL.mode === "axis" ? `<button class="btn sm${TL.split ? " on" : ""}" id="tlSplit" aria-pressed="${TL.split}">${esc(TL.split ? tl("Jedna linka") : tl("Rozložiť na linky"))}</button>` : ""}
+    </div>
+    <div class="tl-main">${all.length ? `<div class="tl-view" id="tlView"><div class="tl-axis" id="tlAxis"></div><div class="tl-lanes" id="tlLanes"></div></div>` : `<div class="bigempty"><h3>Časová os</h3><p style="max-width:52ch">Doplň čas scénam (v inšpektore scény) a záznamom vo Svete – narodenie postáv, udalosti, vznik krajín. Kronikár ich zoradí na jednu os a upozorní, keď je niekto na dvoch miestach naraz.</p><p class="hint">Čas sa píše v kalendári tvojho sveta – nastav si ho tlačidlom Kalendár.</p></div>`}</div>
+    <div class="tl-side"><div class="segs small"><button class="seg${TL.side === "warn" ? " on" : ""}" data-tlside="warn">${esc(tl("Upozornenia"))} <b class="mono">${D.warns.length || ""}</b></button><button class="seg${TL.side === "sel" ? " on" : ""}" data-tlside="sel">${esc(tl("Detail"))}</button><button class="seg${TL.side === "none" ? " on" : ""}" data-tlside="none">${esc(tl("Bez času"))} <b class="mono">${noTimeScenes.length + noTimeEnts.length + noTimeEvs.length || ""}</b></button></div><div id="tlSide"></div></div>
+  </div>`;
+  $$("[data-tls]", main).forEach(b => b.onclick = () => { TL.show[b.dataset.tls] = !TL.show[b.dataset.tls]; renderTimeline(main); });
+  $$("[data-tlc]", main).forEach(c => c.onchange = () => { TL.pick.set(c.dataset.tlc, c.checked); if (c.checked) TL.chars.add(c.dataset.tlc); else TL.chars.delete(c.dataset.tlc); draw(); const n = $(".tl-chars summary span", main); if (n) n.textContent = tl("Postavy") + " (" + TL.chars.size + ")"; });
+  $("#tlRefresh", main).onclick = () => { TL.view = null; TL.fitAll = true; renderTimeline(main); toast(tl("Časová os je načítaná znova.")); };
+  $$("[data-tlside]", main).forEach(b => b.onclick = () => { TL.side = b.dataset.tlside; renderTimeline(main); });
+  $("#tlCal", main).onclick = () => openCalendar(() => renderTimeline(main));
+  $$("[data-tlm]", main).forEach(b => b.onclick = () => { TL.mode = b.dataset.tlm; try { localStorage.setItem("kronikar:tlmode", TL.mode); } catch { } if (TL.sel && TL.sel.k === "bucket") TL.sel = null; renderTimeline(main); });
+  $("#tlSplit", main)?.addEventListener("click", () => { TL.split = !TL.split; try { localStorage.setItem("kronikar:tlsplit", TL.split ? "1" : "0"); } catch { } if (TL.sel && TL.sel.k === "bucket") TL.sel = null; renderTimeline(main); });
+  const side = $("#tlSide", main);
+  /* side panel */
+  const go = (k, id) => { if (k === "scene") { const f = findNode(id); if (f && f.parent) setOpen(f.parent, true); S.tool = null; S.sel = id; setMode("write"); } else openEnt(id); };
+  if (TL.side === "warn") {
+    side.innerHTML = D.warns.length ? D.warns.map((w, i) => `<div class="tlw"><span class="tlw-i">!</span><div><div>${esc(w.txt)}</div><div class="chips">${[w.a, w.b].filter(Boolean).map(n => `<button class="chip link" data-tlgo="${n.id}">${esc(n.title)} <small>${esc(trange(n.time))}</small></button>`).join("")}</div></div><button class="btn sm ghost" data-tlign="${i}" title="${esc(tl("Je to v poriadku – skryť"))}">${esc(tl("V poriadku"))}</button></div>`).join("") : `<p class="hint">${esc(all.length ? tl("Žiadne rozpory – nikto nie je na dvoch miestach naraz.") : tl("Upozornenia sa ukážu, keď scény a postavy dostanú čas."))}</p>`;
+    if (D.ignored) side.insertAdjacentHTML("beforeend", `<button class="lnk hint" id="tlUnign">${esc(tl("Zobraziť aj skryté ({x})").replace("{x}", D.ignored))}</button>`);
+    $$("[data-tlign]", side).forEach(b => b.onclick = () => { S.p.tlIgnore = [...new Set([...(S.p.tlIgnore || []), D.warns[+b.dataset.tlign].key])]; saveProject(); renderTimeline(main); });
+    $("#tlUnign", side)?.addEventListener("click", () => { delete S.p.tlIgnore; saveProject(); renderTimeline(main); });
+    $$("[data-tlgo]", side).forEach(b => b.onclick = () => { TL.sel = { k: "scene", id: b.dataset.tlgo }; TL.side = "sel"; TL.focus = TL.sel; renderTimeline(main); });
+  } else if (TL.side === "sel") {
+    const s = TL.sel, obj = s && s.k !== "bucket" && (s.k === "scene" ? findNode(s.id)?.n : S.ents[s.id]);
+    if (s && s.k === "bucket") renderBucket(side, D, s.id, main, go);
+    else if (!obj) side.innerHTML = `<p class="hint">${esc(TL.mode === "axis" ? tl("Klikni na čiarku na osi – ukáže sa, čo sa v tom mesiaci alebo roku stalo.") : tl("Klikni na scénu, udalosť alebo čiaru postavy na osi."))}</p>`;
+    else {
+      const isScene = s.k === "scene", who = isScene ? D.chars.filter(c => D.present[c.id].includes(obj.id)) : [];
+      side.innerHTML = `<div class="tl-det"><div class="pp-h"><span class="cd" style="background:${isScene ? (obj.pov && D.color[obj.pov]) || "var(--accent)" : catColor(obj.cat)}"></span><div class="pp-t"><b class="pp-name static">${esc(isScene ? obj.title : obj.name)}</b><small class="hint">${esc(isScene ? sceneChapterTitle(obj) : CAT[obj.cat]?.one || "")}</small></div></div>
+        ${timeEditorHtml(obj, isScene ? "scene" : obj.cat)}${dayInfoHtml(obj.time)}
+        ${isScene ? `<div class="hint">${obj.pov && S.ents[obj.pov] ? esc(tl("Rozprávač")) + ": " + esc(S.ents[obj.pov].name) + " · " : ""}${obj.place && S.ents[obj.place] ? esc(tl("Miesto")) + ": " + esc(S.ents[obj.place].name) : ""}</div>${who.length ? `<div class="chips">${who.map(c => `<span class="chip"><i class="dot" style="background:${D.color[c.id]}"></i>${esc(c.name)}</span>`).join("")}</div>` : ""}${obj.synopsis ? `<p class="hint">${esc(obj.synopsis)}</p>` : ""}` : obj.summary ? `<p class="hint">${esc(obj.summary)}</p>` : ""}
+        <div class="btnrow"><button class="btn sm primary" id="tlOpen">${esc(isScene ? tl("Otvoriť scénu") : tl("Otvoriť záznam"))}</button></div></div>`;
+      bindTimeEditor(side, obj, () => { if (isScene) saveProject(); else saveEnt(obj.id); laterDraw(); });
+      $("#tlOpen", side).onclick = () => go(s.k, s.id);
+    }
+  } else {
+    side.innerHTML = `${noTimeScenes.length ? `<div class="lbl">${esc(tl("Scény bez času"))}</div>${noTimeScenes.map(s => `<div class="tl-nt" data-nts="${s.n.id}"><button class="lnk" data-ntgo="${s.n.id}">${esc(sceneTitleFull(s.n))}</button>${timeInput("from", null)}</div>`).join("")}` : ""}
+      ${noTimeEnts.length ? `<div class="lbl" style="margin-top:10px">${esc(tl("Postavy a udalosti bez času"))}</div>${noTimeEnts.map(e => `<div class="tl-nt" data-nte="${e.id}"><button class="lnk" data-ntent="${e.id}">${esc(e.name)} <small class="hint">${esc(tl(timeLabels(e.cat)[0]))}</small></button>${timeInput("from", null)}</div>`).join("")}` : ""}
+      ${noTimeEvs.length ? `<div class="lbl" style="margin-top:10px">${esc(tl("Vlastné udalosti bez času"))}</div>${noTimeEvs.map(x => `<div class="tl-nt" data-ntv="${x.e.id}|${x.v.id}"><button class="lnk" data-ntent="${x.e.id}"><span class="no-tr">${esc(x.v.t)}</span> <small class="hint no-tr">${esc(x.e.name)}${x.v.when ? " · " + esc(x.v.when) : ""}</small></button>${timeInput("from", null)}</div>`).join("")}` : ""}
+      ${noTimeScenes.length + noTimeEnts.length + noTimeEvs.length ? `<p class="hint">${esc(tl("Stačí rok – mesiac a deň sú voliteľné. Po vyplnení sa položka presunie na os."))}</p>` : `<p class="hint">${esc(tl("Všetky scény, postavy a udalosti už majú čas."))}</p>`}`;
+    $$("[data-nts],[data-nte]", side).forEach(row => { const obj = row.dataset.nts ? findNode(row.dataset.nts)?.n : S.ents[row.dataset.nte]; const box = $(".tinput", row); const upd = () => { const tv = readTime(box); if (!tv) return; obj.time = { from: tv }; if (row.dataset.nts) saveProject(); else saveEnt(obj.id); laterRender(); }; $$("input,select", box).forEach(i => i.addEventListener("change", upd)); });
+    $$("[data-ntv]", side).forEach(row => { const [eid, vid] = row.dataset.ntv.split("|"), v = (S.ents[eid]?.evs || []).find(x => x.id === vid), box = $(".tinput", row); if (!v) return; const upd = () => { const tv = readTime(box); if (!tv) return; v.time = { from: tv }; saveEnt(eid); laterRender(); }; $$("input,select", box).forEach(i => i.addEventListener("change", upd)); });
+    $$("[data-ntgo]", side).forEach(b => b.onclick = () => go("scene", b.dataset.ntgo));
+    $$("[data-ntent]", side).forEach(b => b.onclick = () => go("ent", b.dataset.ntent));
+  }
+  const laterRender = debounce(() => { if (S.mode === "time" && !document.activeElement?.closest?.(".tl-side")) renderTimeline(main); }, 1200);
+  if (!all.length) return;
+  /* drawing */
+  const view = $("#tlView", main), axis = $("#tlAxis", main), lanes = $("#tlLanes", main);
+  let lo = Math.min(...all.map(s => s[0])), hi = Math.max(...all.map(s => s[1])); if (hi - lo < 1e-6) { lo -= .5; hi += .5; }
+  const LABW = innerWidth < 700 ? 92 : 150;
+  const story = D.scenes.filter(s => s.sp).map(s => s.sp);
+  const fitTo = (a, b) => { if (b - a < 1e-6) { const c = cal(); a -= 3 / (c.months.length * c.mdays); b += 3 / (c.months.length * c.mdays); } const w = Math.max(100, view.clientWidth - LABW - 170); TL.view = { k: w / (b - a), t0: a - 30 / (w / (b - a)) }; };
+  const fit = () => fitTo(lo, hi);
+  const fitStory = () => story.length ? fitTo(Math.min(...story.map(x => x[0])), Math.max(...story.map(x => x[1]))) : fit();
+  if (!TL.view) { if (TL.fitAll) fit(); else fitStory(); } TL.fitAll = false;
+  const X = t => LABW + (t - TL.view.t0) * TL.view.k;
+  const draw = () => {
+    /* the axis view goes down to months, never days: keep at least half a year in view */
+    if (TL.mode === "axis") { const vw = Math.max(100, view.clientWidth - LABW), kmax = vw / (6 / cal().months.length); if (TL.view.k > kmax) { const mid = TL.view.t0 + vw / 2 / TL.view.k; TL.view.k = kmax; TL.view.t0 = mid - vw / 2 / kmax; } }
+    const w = view.clientWidth, t1 = TL.view.t0 + (w - LABW) / TL.view.k, D2 = tlData(), html = [];
+    axis.innerHTML = tlTicks(TL.view.t0, t1, TL.view.k).map(t => `<span class="tk${t.major ? " maj" : ""}" style="left:${X(t.t).toFixed(1)}px">${esc(t.lab)}</span>`).join("");
+    if (TL.mode === "axis") {
+      const u = tlaUnit(TL.view.k), items = tlItems(D2), defs = TL.split ? TLA_LANES : [["all", "", null]];
+      const avail = Math.max(140, view.clientHeight - 30), h = TL.split ? Math.max(96, Math.floor(avail / 3)) : avail;
+      const selId = TL.sel && TL.sel.k === "bucket" ? TL.sel.id : null;
+      defs.forEach(([lane, lab, lc]) => {
+        const groups = new Map();
+        items.filter(it => lane === "all" || it.lane === lane).forEach(it => { const b = Math.floor(it.sp[0] / u + 1e-9); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(it); });
+        let marks = "";
+        groups.forEach((list, b) => {
+          const x = X((b + .5) * u); if (x < LABW - 10 || x > w + 10) return;
+          const kinds = TLA_LANES.filter(L => list.some(it => it.lane === L[0])).map(L => L[2]), n = list.length, th = Math.min(h - 24, 18 + 7 * Math.min(n, 6));
+          const bg = lane === "all" ? (kinds.length > 1 ? `linear-gradient(${kinds.map((c, i) => `${c} ${i * 100 / kinds.length}% ${(i + 1) * 100 / kinds.length}%`).join(",")})` : kinds[0]) : lc;
+          const key = tlaKey(lane, b, u);
+          marks += `<button class="tla-tick${selId === key ? " sel" : ""}" data-tlk="bucket" data-tlid="${key}" style="left:${x.toFixed(1)}px;--th:${th}px;--bg:${bg}" title="${esc(tlaLabel(b, u) + " · " + n + "×")}"><i></i>${n > 1 ? `<b>${n}</b>` : ""}</button>`;
+        });
+        html.push(`<div class="tl-lane tla-lane" style="height:${h}px"><div class="tl-lab" style="width:${LABW}px">${lc ? `<i style="background:${lc}"></i>` : ""}<span>${esc(lab ? tl(lab) : u < 1 ? tl("po mesiacoch") : u === 1 ? tl("po rokoch") : tl("po {x} rokoch", u))}</span></div><div class="tla-line" style="left:${LABW}px"></div>${marks}</div>`);
+      });
+      if (!items.length) html.push(`<p class="hint" style="padding:12px 12px 12px ${LABW + 12}px">${esc(tl("Nič na zobrazenie – zapni Dej alebo Udalosti, alebo vyber postavy."))}</p>`);
+      lanes.innerHTML = html.join(""); return;
+    }
+    const lane = (label, color, items, cls = "") => {
+      const n = pack(items), h = Math.max(1, n) * 26 + 10;
+      html.push(`<div class="tl-lane ${cls}" style="height:${h}px"><div class="tl-lab" style="width:${LABW}px">${color ? `<i style="background:${color}"></i>` : ""}<span>${esc(label)}</span></div>${items.map(it => it.html.replace("{top}", (it.row * 26 + 6) + "px")).join("")}</div>`);
+    };
+    const bar = (sp, cls, col, title, data, sel) => { const x0 = X(sp[0]), x1 = Math.max(X(sp[1]), x0 + 10); return { x0, x1: x1 + Math.min(160, title.length * 6.5), html: `<button class="tl-it ${cls}${sel ? " sel" : ""}" ${data} style="left:${x0.toFixed(1)}px;width:${(x1 - x0).toFixed(1)}px;top:{top};--c:${col}" title="${esc(title)}"><span>${esc(title)}</span></button>` }; };
+    const isSel = (k, id) => TL.sel && TL.sel.k === k && TL.sel.id === id;
+    if (TL.show.scenes) lane(tl("Dej"), null, D2.scenes.filter(s => s.sp).map(s => bar(s.sp, "sc", (s.n.pov && D2.color[s.n.pov]) || "var(--accent)", s.n.title || tl("Bez názvu"), `data-tlk="scene" data-tlid="${s.n.id}"`, isSel("scene", s.n.id))), "dej");
+    if (TL.show.events && D2.events.length) lane(tl("Udalosti a svet"), null, D2.events.map(x => bar(x.sp, "ev" + (x.v ? " own" : ""), cssCol(catColor(x.e.cat)), x.v ? x.e.name + ": " + x.v.t : x.e.name, `data-tlk="ent" data-tlid="${x.e.id}"`, isSel("ent", x.e.id))));
+    D2.chars.filter(c => TL.chars.has(c.id)).forEach(c => {
+      const life = tspan(c.time), col = D2.color[c.id], items = [];
+      const scs = D2.scenes.filter(s => s.sp && D2.present[c.id].includes(s.n.id));
+      let html2 = "";
+      if (life) { const open = !tvOk(c.time.to), x0 = X(life[0]), x1 = open ? Math.max(X(hi) + 60, x0 + 40) : Math.max(X(life[1]), x0 + 4); html2 += `<button class="tl-life${open ? " open" : ""}${isSel("ent", c.id) ? " sel" : ""}" data-tlk="ent" data-tlid="${c.id}" style="left:${x0.toFixed(1)}px;width:${(x1 - x0).toFixed(1)}px;--c:${col}" title="${esc(c.name + " · " + trange(c.time))}"></button>`; }
+      (S.p.links || []).filter(l => (l.a === c.id || l.b === c.id) && S.ents[l.a] && S.ents[l.b] && tspan(l.time)).forEach(l => { const sp = tspan(l.time), o = S.ents[l.a === c.id ? l.b : l.a], x0 = X(sp[0]), x1 = tvOk(l.time.to) ? Math.max(X(sp[1]), x0 + 6) : x0 + 6, lab = relLab(l, c.id) + " " + (o.name || ""); html2 += `<button class="tl-rel${l.past ? " past" : ""}" data-tlk="ent" data-tlid="${o.id}" style="left:${x0.toFixed(1)}px;width:${(x1 - x0).toFixed(1)}px;--c:${col}" title="${esc(lab + " · " + trange(l.time))}">${x1 - x0 > 70 ? `<span>${esc(lab)}</span>` : ""}</button>`; });
+      (c.evs || []).filter(v => tspan(v.time)).forEach(v => { const sp = tspan(v.time), x0 = X(sp[0]), x1 = tvOk(v.time.to) ? Math.max(X(sp[1]), x0 + 6) : x0 + 6; html2 += `<button class="tl-rel own" data-tlk="ent" data-tlid="${c.id}" style="left:${x0.toFixed(1)}px;width:${(x1 - x0).toFixed(1)}px;--c:${col}" title="${esc(v.t + " · " + trange(v.time))}"><span class="no-tr ${x1 - x0 > 70 ? "" : "out"}">${esc(v.t)}</span></button>`; });
+      /* write the place only when it changes, and not over the next dot */
+      const ds = scs.map(s => ({ s, x: X(s.sp[0]), pl: s.n.place && S.ents[s.n.place] })).sort((p, q) => p.x - q.x);
+      ds.forEach((d, i) => { const prev = ds[i - 1], next = ds.slice(i + 1).find(q => q.x > d.x + 2), show = d.pl && (!prev || prev.s.n.place !== d.s.n.place), room = next ? next.x - d.x - 24 : 200;
+        html2 += `<button class="tl-dot${isSel("scene", d.s.n.id) ? " sel" : ""}" data-tlk="scene" data-tlid="${d.s.n.id}" style="left:${d.x.toFixed(1)}px;--c:${col}" title="${esc((d.s.n.title || "") + (d.pl ? " · " + d.pl.name : "") + " · " + trange(d.s.n.time))}">${show && room > 24 ? `<span style="max-width:${Math.min(200, room)}px">${esc(d.pl.name)}</span>` : ""}</button>`; });
+      html.push(`<div class="tl-lane chr" style="height:40px"><div class="tl-lab" style="width:${LABW}px"><i style="background:${col}"></i><button class="lnk" data-tlk="ent" data-tlid="${c.id}">${esc(c.name)}</button></div>${html2}</div>`);
+    });
+    lanes.innerHTML = html.join("");
+  };
+  const laterDraw = debounce(draw, 300);
+  draw();
+  if (TL.focus) { const f = TL.focus; TL.focus = null; const obj = f.k === "scene" ? findNode(f.id)?.n : S.ents[f.id], sp = obj && tspan(obj.time); if (sp) { const w = view.clientWidth; TL.view.t0 = (sp[0] + sp[1]) / 2 - (w - LABW) / 2 / TL.view.k; TL.sel = f; draw(); } }
+  /* interaction */
+  const zoomAt = (f, cx) => { const r = view.getBoundingClientRect(), px = Math.max(LABW, cx - r.left), t = TL.view.t0 + (px - LABW) / TL.view.k; TL.view.k = Math.min(1e7, Math.max(1e-4, TL.view.k * f)); TL.view.t0 = t - (px - LABW) / TL.view.k; draw(); };
+  view.onwheel = ev => { ev.preventDefault(); if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY) || ev.shiftKey) { TL.view.t0 += (ev.deltaX || ev.deltaY) / TL.view.k; draw(); return; } zoomAt(Math.exp(-ev.deltaY * .0015), ev.clientX); };
+  const pts = new Map(); let g = null;
+  view.onpointerdown = ev => { if (ev.button > 0) return; pts.set(ev.pointerId, ev.clientX); if (pts.size === 1) g = { sx: ev.clientX, sy: ev.clientY, t0: TL.view.t0, st: view.scrollTop, moved: false, target: ev.target.closest("[data-tlk]") }; else if (pts.size === 2) { const [a, b] = [...pts.values()]; g = { pinch: true, d: Math.abs(a - b), k: TL.view.k, moved: true }; } view.setPointerCapture(ev.pointerId); };
+  view.onpointermove = ev => {
+    if (!pts.has(ev.pointerId) || !g) return; pts.set(ev.pointerId, ev.clientX);
+    if (g.pinch && pts.size === 2) { const [a, b] = [...pts.values()], d = Math.abs(a - b); if (g.d > 10) zoomAt(g.k * d / g.d / TL.view.k, (a + b) / 2); return; }
+    const dx = ev.clientX - g.sx, dy = ev.clientY - g.sy; if (!g.moved && Math.hypot(dx, dy) < 6) return; g.moved = true;
+    TL.view.t0 = g.t0 - dx / TL.view.k; view.scrollTop = g.st - dy; draw();
+  };
+  const end = ev => { if (!pts.has(ev.pointerId)) return; pts.delete(ev.pointerId); if (pts.size || !g) return; const was = g; g = null; if (was.moved || was.pinch) return; if (was.target) { TL.sel = { k: was.target.dataset.tlk, id: was.target.dataset.tlid }; TL.side = "sel"; renderTimeline(main); } };
+  view.onpointerup = end; view.onpointercancel = end;
+  $$("[data-tlz]", main).forEach(b => b.onclick = () => { const r = view.getBoundingClientRect(); if (b.dataset.tlz === "fit") { fit(); draw(); } else if (b.dataset.tlz === "story") { fitStory(); draw(); } else zoomAt(b.dataset.tlz === "in" ? 1.6 : 1 / 1.6, r.left + LABW + (r.width - LABW) / 2); });
+  if (!renderTimeline.ro) renderTimeline.ro = new ResizeObserver(() => renderTimeline.onResize && renderTimeline.onResize());
+  renderTimeline.ro.disconnect(); renderTimeline.ro.observe(view); renderTimeline.onResize = () => { if (S.mode === "time" && view.isConnected) draw(); };
+}
+function openCalendar(after) {
+  const c = cal();
+  const M = modal(`<h3 style="margin:0 0 4px">${esc(tl("Kalendár tvojho sveta"))}</h3><p class="hint" style="margin:0 0 12px">${esc(tl("Čas v Kronikári sa píše v rokoch tvojho sveta. Mesiace a dni sú voliteľné – stačí, ak im dáš mená a dĺžku."))}</p>
+    <div class="fgrid"><label class="field"><span>${esc(tl("Letopočet / éra za rokom"))}</span><input class="inp" id="cEra" value="${esc(c.era)}" placeholder="${esc(tl("napr. po Zjednotení"))}"></label><label class="field"><span>${esc(tl("Dní v mesiaci"))}</span><input class="inp mono" id="cDays" type="number" min="1" max="100" value="${c.mdays}"></label></div>
+    <label class="field"><span>${esc(tl("Mesiace – jeden na riadok"))}</span><textarea class="inp" id="cMonths" rows="6">${esc(c.months.join("\n"))}</textarea></label>
+    <details class="calx"${(S.p.cal || {}).holidays?.length || (S.p.cal || {}).moons?.length || (S.p.cal || {}).seasons?.length ? " open" : ""}><summary class="lbl" style="cursor:pointer">${esc(tl("Sviatky, mesiace na oblohe a ročné obdobia"))}</summary>
+      <label class="field"><span>${esc(tl("Sviatky – deň. mesiac Názov"))}</span><textarea class="inp" id="cHol" rows="3" placeholder="${esc(tl("napr. 21. jún Slnovrat"))}">${esc(calExtraText().hol)}</textarea></label>
+      <label class="field"><span>${esc(tl("Mesiace na oblohe – Názov, dĺžka cyklu v dňoch, posun"))}</span><textarea class="inp" id="cMoon" rows="2" placeholder="${esc(tl("napr. Biely mesiac, 28, 3"))}">${esc(calExtraText().moon)}</textarea></label>
+      <label class="field"><span>${esc(tl("Ročné obdobia – Názov: mesiace"))}</span><textarea class="inp" id="cSea" rows="4" placeholder="${esc(tl("napr. Zima: december, január, február"))}">${esc(calExtraText().sea)}</textarea></label>
+      <span class="hint">${esc(tl("Pri scéne s dátumom sa potom ukáže, či padne na sviatok, spln alebo do ktorého obdobia."))}</span></details>
+    <div class="btnrow"><button class="btn primary" id="cSave">${esc(tl("Uložiť"))}</button><button class="btn" data-close>${esc(tl("Zrušiť"))}</button></div>`, "narrow");
+  $("#cSave", M.el).onclick = () => { const months = $("#cMonths", M.el).value.split("\n").map(x => x.trim()).filter(Boolean); S.p.cal = Object.assign({ era: $("#cEra", M.el).value.trim(), months, mdays: Math.max(1, Math.min(100, +$("#cDays", M.el).value || 30)) }, parseCalExtra($("#cHol", M.el).value, $("#cMoon", M.el).value, $("#cSea", M.el).value, months.length ? months : cal().months)); saveProject(); M.close(); after && after(); };
+}
+</script>

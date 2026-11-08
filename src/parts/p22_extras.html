@@ -1,0 +1,402 @@
+<script>
+/* ================= world & story extras: ages in scenes, family tree, journeys on maps,
+   appendices for export, plot threads, who knows what ================= */
+
+/* reading order of every node of the manuscript (a folder comes before its content) */
+function readOrder() { const m = new Map(); let i = 0; walk(S.p.binder, n => { m.set(n.id, i++); }); return m; }
+function scenePresent(n) {
+  const html = S.items[n.id]?.html;
+  const cp = nodePovs(n);
+  return entsBy("postava").filter(c => n.pov === c.id || cp.includes(c.id) || (n.ents || []).includes(c.id) || mentions(c, html));
+}
+const yearDays = () => { const c = cal(); return c.months.length * c.mdays; };
+
+/* ---------- 1. ages of characters in a scene ---------- */
+function charAt(c, sp) {
+  if (!c.time || !tvOk(c.time.from)) return null;
+  const born = tnum(c.time.from);
+  if (sp[1] < born) return { state: "unborn" };
+  if (tvOk(c.time.to) && sp[0] > tnum(c.time.to, true)) return { state: "dead" };
+  return { state: "alive", age: Math.max(0, Math.floor(sp[0] - born + 1e-9)) };
+}
+const ageTxt = n => LANG === "en" ? n + (n === 1 ? " year" : " years") : n + " " + plural(n, "rok", "roky", "rokov");
+function sceneAgesHtml(n) {
+  const sp = tspan(n.time); if (!sp) return "";
+  const rows = scenePresent(n).map(c => [c, charAt(c, sp)]).filter(([, a]) => a);
+  if (!rows.length) return "";
+  return `<div class="ages"><span class="lbl">${esc(tl("Vek postáv v scéne"))}</span><div class="chips">${rows.map(([c, a]) => a.state === "alive" ? `<span class="chip"><span class="no-tr">${esc(c.name)}</span>&nbsp;<b>${esc(ageTxt(a.age))}</b></span>` : `<span class="chip warnchip" title="${esc(tl("Skontroluj čas scény alebo narodenie postavy."))}">! <span class="no-tr">${esc(c.name)}</span>&nbsp;· ${esc(a.state === "unborn" ? tl("ešte sa nenarodil(a)") : tl("už nežije"))}</span>`).join("")}</div></div>`;
+}
+/* age span of a character across the scenes with a time */
+function charStoryAge(c) {
+  if (!c.time || !tvOk(c.time.from)) return "";
+  const ages = allTexts().filter(n => tspan(n.time) && (n.pov === c.id || (n.ents || []).includes(c.id) || nodePovs(n).includes(c.id) || mentions(c, S.items[n.id]?.html))).map(n => charAt(c, tspan(n.time))).filter(a => a && a.state === "alive").map(a => a.age);
+  if (!ages.length) return "";
+  const a = Math.min(...ages), b = Math.max(...ages);
+  return a === b ? tl("V deji knihy má {x}.", ageTxt(a)) : tl("V deji knihy má {x} – {x}.", String(a), ageTxt(b));
+}
+
+/* ---------- 2. family tree ---------- */
+const FAM_KINDS = [["parent", "je rodičom"], ["child", "je dieťaťom"], ["spouse", "je partnerom / partnerkou"], ["sibling", "je súrodencom"], ["none", "nepatrí do rodokmeňa"]];
+function famGuess(label) {
+  const l = relNorm(label);
+  if (/(bratran|sesternic|synov|neter|stryk|strycn|ujo|teta|svokr|svagr|zatom|zat$|nevest|bratov|sestrin)/.test(l)) return null;
+  if (/\b(otc|otec|matk|matka|rodic|father|mother|parent)/.test(l)) return "parent";
+  if (/\b(syn|dcer|dcera|dietat|dieta|son|daughter|child)/.test(l)) return "child";
+  if (/\b(manzel|partner|snubenec|snubenic|husband|wife|spouse|married)/.test(l)) return "spouse";
+  if (/\b(surodenc|brat|sestr|dvojic|sibling|brother|sister|twin)/.test(l)) return "sibling";
+  return null;
+}
+const FAM_CATS = ["postava", "bozstvo"];
+function famKind(label) { const m = S.p.famMap || {}; return m[label] || famGuess(label); }
+function famLinks() { return (S.p.links || []).filter(l => { const A = S.ents[l.a], B = S.ents[l.b]; return A && B && A.cat === B.cat && FAM_CATS.includes(A.cat); }); }
+function famData() {
+  const par = new Map(), spouse = new Set(), sib = [], nodes = new Set();
+  const addPar = (child, p) => { if (!par.has(child)) par.set(child, new Set()); par.get(child).add(p); };
+  famLinks().forEach(l => {
+    const k = famKind(l.label); if (!k || k === "none") return;
+    nodes.add(l.a); nodes.add(l.b);
+    if (k === "parent") addPar(l.b, l.a); else if (k === "child") addPar(l.a, l.b);
+    else if (k === "spouse") spouse.add([l.a, l.b].sort().join("|")); else sib.push([l.a, l.b]);
+  });
+  /* siblings share known parents */
+  const groups = new Map(); const root = x => { while (groups.has(x) && groups.get(x) !== x) x = groups.get(x); return x; };
+  sib.forEach(([a, b]) => { groups.set(a, root(a)); groups.set(b, root(b)); groups.set(root(a), root(b)); });
+  const sg = new Map(); [...nodes].forEach(n => { if (!groups.has(n)) return; const r = root(n); if (!sg.has(r)) sg.set(r, []); sg.get(r).push(n); });
+  sg.forEach(list => { const ps = new Set(); list.forEach(n => (par.get(n) || []).forEach(p => ps.add(p))); if (ps.size) list.forEach(n => ps.forEach(p => addPar(n, p))); });
+  return { nodes: [...nodes], par, spouse: [...spouse].map(s => s.split("|")), sibGroups: [...sg.values()].filter(l => l.length > 1) };
+}
+function famLayout(F) {
+  const gen = new Map(), adj = new Map(), push = (a, b, d) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push([b, d]); };
+  F.par.forEach((ps, c) => ps.forEach(p => { push(p, c, 1); push(c, p, -1); }));
+  F.spouse.forEach(([a, b]) => { push(a, b, 0); push(b, a, 0); });
+  F.sibGroups.forEach(g => g.forEach(a => g.forEach(b => a !== b && push(a, b, 0))));
+  const comps = [], name = id => S.ents[id]?.name || "";
+  const order = F.nodes.slice().sort((a, b) => (F.par.has(a) ? 1 : 0) - (F.par.has(b) ? 1 : 0) || name(a).localeCompare(name(b), "sk"));
+  order.forEach(s => {
+    if (gen.has(s)) return; const comp = [s]; gen.set(s, 0); const q = [s];
+    while (q.length) { const x = q.shift(); (adj.get(x) || []).forEach(([y, d]) => { if (!gen.has(y)) { gen.set(y, gen.get(x) + d); comp.push(y); q.push(y); } }); }
+    const mn = Math.min(...comp.map(x => gen.get(x))); comp.forEach(x => gen.set(x, gen.get(x) - mn)); comps.push(comp);
+  });
+  const BW = 156, BH = 50, GX = 26, GY = 74, pos = new Map(); let ox = 0;
+  comps.sort((a, b) => b.length - a.length).forEach(comp => {
+    const rows = []; comp.forEach(x => { const g = gen.get(x); (rows[g] = rows[g] || []).push(x); });
+    const xOf = new Map();
+    const place = (row) => { let x = 0; row.forEach(id => { xOf.set(id, x); x += BW + GX; }); };
+    for (let pass = 0; pass < 3; pass++) rows.forEach((row, g) => {
+      if (!row) return;
+      if (g > 0 || pass > 0) {
+        const bc = id => { const ps = [...(F.par.get(id) || [])].filter(p => xOf.has(p)); if (ps.length) return ps.reduce((s, p) => s + xOf.get(p), 0) / ps.length; const kids = [...F.par.entries()].filter(([, s]) => s.has(id)).map(([c]) => c).filter(c => xOf.has(c)); if (kids.length) return kids.reduce((s, c) => s + xOf.get(c), 0) / kids.length; return xOf.has(id) ? xOf.get(id) : 1e9; };
+        row.sort((a, b) => bc(a) - bc(b));
+      }
+      /* partners side by side */
+      for (let i = 0; i < row.length; i++) { const sp = F.spouse.find(([a, b]) => a === row[i] || b === row[i]); if (!sp) continue; const o = sp[0] === row[i] ? sp[1] : sp[0], j = row.indexOf(o); if (j > i + 1) { row.splice(j, 1); row.splice(i + 1, 0, o); } }
+      place(row);
+    });
+    /* centre each generation under the widest one, then pull children under their parents */
+    const width = Math.max(...rows.filter(Boolean).map(r => r.length)) * (BW + GX) - GX;
+    rows.forEach(row => { if (!row) return; const w = row.length * (BW + GX) - GX, sh = (width - w) / 2; row.forEach(id => xOf.set(id, xOf.get(id) + sh)); });
+    rows.forEach((row, g) => { if (!row || !g) return; let minX = -1e9; row.forEach(id => { const ps = [...(F.par.get(id) || [])].filter(p => xOf.has(p)); let want = xOf.get(id); if (ps.length) { const sibs = row.filter(s => { const q = F.par.get(s); return q && [...q].sort().join() === [...F.par.get(id)].sort().join(); }); const k = sibs.indexOf(id), mid = ps.reduce((s, p) => s + xOf.get(p), 0) / ps.length; want = mid - (sibs.length - 1) * (BW + GX) / 2 + k * (BW + GX); } const x = Math.max(want, minX); xOf.set(id, x); minX = x + BW + GX; }); });
+    const mnx = Math.min(...comp.map(id => xOf.get(id)));
+    comp.forEach(id => pos.set(id, { x: ox + xOf.get(id) - mnx, y: gen.get(id) * (BH + GY) }));
+    ox = Math.max(...comp.map(id => pos.get(id).x)) + BW + GX * 4;
+  });
+  const W = Math.max(BW, ox - GX * 4), H = Math.max(BH, ...[...pos.values()].map(p => p.y + BH));
+  return { pos, BW, BH, GY, W, H };
+}
+/* the tree as SVG; pal = colours (the app's theme, or light for print) */
+function famSvg(F, L, pal, sel) {
+  const { pos, BW, BH, GY } = L, P = 20, out = [];
+  const cx = id => pos.get(id).x + BW / 2 + P, top = id => pos.get(id).y + P;
+  F.spouse.forEach(([a, b]) => { if (!pos.has(a) || !pos.has(b)) return; const [l, r] = pos.get(a).x < pos.get(b).x ? [a, b] : [b, a], y = top(l) + BH / 2; if (pos.get(l).y === pos.get(r).y) out.push(`<path d="M${pos.get(l).x + BW + P} ${y - 2}H${pos.get(r).x + P}M${pos.get(l).x + BW + P} ${y + 2}H${pos.get(r).x + P}" stroke="${pal.line}" stroke-width="1.4" fill="none"/>`); });
+  const fams = new Map(); F.par.forEach((ps, c) => { if (!pos.has(c)) return; const k = [...ps].filter(p => pos.has(p)).sort().join("|"); if (!k) return; if (!fams.has(k)) fams.set(k, []); fams.get(k).push(c); });
+  fams.forEach((kids, k) => {
+    const ps = k.split("|"), px = ps.reduce((s, p) => s + cx(p), 0) / ps.length, py = Math.max(...ps.map(p => top(p))) + (ps.length > 1 && pos.get(ps[0]).y === pos.get(ps[1]).y ? BH / 2 : BH);
+    const bus = Math.min(...kids.map(c => top(c))) - GY / 2, xs = kids.map(cx);
+    out.push(`<path d="M${px} ${py}V${bus}M${Math.min(px, ...xs)} ${bus}H${Math.max(px, ...xs)}${xs.map(x => `M${x} ${bus}V${bus + GY / 2}`).join("")}" stroke="${pal.line}" stroke-width="1.4" fill="none"/>`);
+  });
+  F.sibGroups.forEach(g => { if (g.some(id => F.par.has(id))) return; const ps = g.filter(id => pos.has(id)); if (ps.length < 2) return; const y = Math.min(...ps.map(top)) - 14, xs = ps.map(cx); out.push(`<path d="M${Math.min(...xs)} ${y}H${Math.max(...xs)}${xs.map(x => `M${x} ${y}V${y + 14}`).join("")}" stroke="${pal.line}" stroke-width="1.2" stroke-dasharray="4 3" fill="none"/>`); });
+  pos.forEach((p, id) => {
+    const e = S.ents[id], col = pal.cat(e.cat), yrs = e.time && tvOk(e.time.from) ? (e.time.from.y + (tvOk(e.time.to) ? " – " + e.time.to.y : " –")) : (keyFieldOf(e)?.v || "");
+    const nm = (e.name || tl("Bez mena")), fit = s => s.length > 22 ? s.slice(0, 21) + "…" : s;
+    out.push(`<g class="fnode${sel === id ? " sel" : ""}" data-fid="${id}" style="cursor:pointer"><rect x="${p.x + P}" y="${p.y + P}" width="${BW}" height="${BH}" rx="8" fill="${pal.paper}" stroke="${sel === id ? pal.accent : pal.line}" stroke-width="${sel === id ? 2.2 : 1.2}"/><rect x="${p.x + P}" y="${p.y + P}" width="5" height="${BH}" rx="2" fill="${col}"/><text x="${p.x + P + BW / 2 + 2}" y="${p.y + P + (yrs ? 21 : 30)}" text-anchor="middle" font-family="Georgia, serif" font-size="13.5" font-weight="700" fill="${pal.ink}">${esc(fit(nm))}<title>${esc(nm)}</title></text>${yrs ? `<text x="${p.x + P + BW / 2 + 2}" y="${p.y + P + 38}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="${pal.muted}">${esc(fit(String(yrs)))}</text>` : ""}</g>`);
+  });
+  const W = L.W + P * 2, H = L.H + P * 2;
+  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${pal.bg ? `<rect width="${W}" height="${H}" fill="${pal.bg}"/>` : ""}${out.join("")}</svg>`, W, H };
+}
+const PAL_PRINT = { ink: "#1E1E1E", muted: "#6E6E6E", line: "#9A9A9A", paper: "#FFFFFF", accent: "#B5523A", bg: "#FFFFFF", cat: id => ({ postava: "#35589C", bozstvo: "#4F55C9" })[id] || "#646A75" };
+function palApp() { const v = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim(); return { ink: v("--ink"), muted: v("--ink-3"), line: v("--ink-3"), paper: v("--paper"), accent: v("--accent"), bg: "", cat: id => cssCol(catColor(id)) }; }
+async function svgToPng(svg, W, H, scale = 2) {
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const c = document.createElement("canvas"); c.width = Math.round(W * scale); c.height = Math.round(H * scale);
+    const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height); return c;
+  } finally { URL.revokeObjectURL(url); }
+}
+const FAM = { sel: null, k: 1 };
+function renderFamily(main) {
+  const g = S.graph, F = famData();
+  const labels = [...new Set(famLinks().map(l => l.label))].sort((a, b) => a.localeCompare(b, "sk"));
+  main.innerHTML = `<div class="graph-wrap fam-wrap" style="flex:1">
+    <div class="graph-main">
+      <div class="gtools">
+        <div class="seg" role="group" aria-label="Zobrazenie"><button data-gm="net">Sieť</button><button data-gm="tree">Strom</button><button data-gm="fam" class="on">${esc(tl("Rodokmeň"))}</button></div>
+        <span class="spacer"></span>
+        <button class="btn icon" data-fz="0.8" aria-label="Oddialiť">−</button><button class="btn icon" data-fz="1.25" aria-label="Priblížiť">${I.plus}</button>
+        <button class="btn sm" id="famPng">${I.dl}${esc(tl("Uložiť ako obrázok"))}</button>
+      </div>
+      <div class="famview" id="famView">${F.nodes.length ? "" : `<div class="bigempty"><h3>${esc(tl("Rodokmeň"))}</h3><p style="max-width:54ch">${esc(tl("Rodokmeň sa poskladá sám zo vzťahov medzi postavami (a medzi božstvami): je otcom, je matkou, je synom, je dcérou, je súrodencom, je manželom / manželkou. Vlastné vzťahy mu môžeš priradiť vpravo."))}</p></div>`}</div>
+    </div>
+    <aside class="gside fam-side"><h3>${esc(tl("Vzťahy v rodokmeni"))}</h3><p class="hint">${esc(tl("Ku každému vzťahu medzi postavami vyber, čo znamená v rodine. Smer: prvá postava → vzťah → druhá postava."))}</p>
+      ${labels.length ? labels.map(l => { const k = famKind(l) || "none", auto = !(S.p.famMap || {})[l]; return `<label class="field famrow"><span class="no-tr">${esc(l)}</span><select class="inp" data-fam="${esc(l)}">${FAM_KINDS.map(([v, n]) => `<option value="${v}"${k === v ? " selected" : ""}>${esc(tl(n))}${auto && k === v && v !== "none" ? " · " + esc(tl("rozpoznané")) : ""}</option>`).join("")}</select></label>`; }).join("") : `<p class="hint">${esc(tl("Zatiaľ žiadne vzťahy medzi postavami."))}</p>`}
+    </aside></div>`;
+  $$("[data-gm]", main).forEach(b => b.onclick = () => { g.mode = b.dataset.gm; g.fitted = false; renderGraph(main); });
+  $$("[data-fam]", main).forEach(s => s.onchange = () => { S.p.famMap = Object.assign({}, S.p.famMap, { [s.dataset.fam]: s.value }); saveProject(); renderFamily(main); });
+  const view = $("#famView", main);
+  if (!F.nodes.length) { $("#famPng", main).disabled = true; return; }
+  const L = famLayout(F), draw = () => { const r = famSvg(F, L, palApp(), FAM.sel); view.innerHTML = r.svg; const s = $("svg", view); s.setAttribute("width", Math.round(r.W * FAM.k)); s.setAttribute("height", Math.round(r.H * FAM.k)); $$("[data-fid]", view).forEach(n => { n.onclick = () => { FAM.sel = n.dataset.fid; draw(); }; n.ondblclick = () => openEnt(n.dataset.fid); }); };
+  draw();
+  $$("[data-fz]", main).forEach(b => b.onclick = () => { FAM.k = Math.max(.3, Math.min(3, FAM.k * +b.dataset.fz)); draw(); });
+  $("#famPng", main).onclick = async () => { const r = famSvg(F, L, PAL_PRINT); const c = await svgToPng(r.svg, r.W, r.H); const blob = await new Promise(res => c.toBlob(res, "image/png")); await saveFile(slug((S.p.title || "kniha") + "-rodokmen") + ".png", blob, "image/png"); };
+  if (FAM.sel && S.ents[FAM.sel]) { const side = $(".fam-side", main); side.insertAdjacentHTML("afterbegin", `<div class="famsel"><b class="no-tr">${esc(S.ents[FAM.sel].name)}</b><button class="btn sm" id="famOpen">${esc(tl("Otvoriť záznam"))}</button></div>`); $("#famOpen", side).onclick = () => openEnt(FAM.sel); }
+}
+
+/* ---------- 3. journeys of characters on a map ---------- */
+function tripPlaces(m) {
+  const P = {};
+  (m.pins || []).forEach(p => { if (p.ent && !P[p.ent]) P[p.ent] = { x: p.x, y: p.y }; });
+  (m.areas || []).forEach(a => { if (a.ent && !P[a.ent]) { const g = polyGeo(a.pts, m.w, m.h); P[a.ent] = { x: g.x, y: g.y }; } });
+  (m.marks || []).forEach(k => { if (k.ent && !P[k.ent]) P[k.ent] = { x: k.x, y: k.y }; });
+  return P;
+}
+/* the stops of one character: scenes they are in, at a place that is on this map */
+function tripOf(c, m, chrono) {
+  const P = tripPlaces(m), ord = readOrder();
+  let sc = allTexts().filter(n => scenePresent(n).includes(c)).map(n => {
+    const pid = n.place && P[n.place] ? n.place : (n.ents || []).find(id => P[id] && S.ents[id]?.cat !== "postava");
+    return pid ? { n, ent: pid, pt: P[pid], sp: tspan(n.time), o: ord.get(n.id) } : null;
+  }).filter(Boolean);
+  if (chrono) sc = sc.filter(s => s.sp).sort((a, b) => a.sp[0] - b.sp[0] || a.o - b.o);
+  const stops = []; sc.forEach(s => { const last = stops[stops.length - 1]; if (last && last.ent === s.ent) { last.scenes.push(s.n); if (s.sp) last.sp = last.sp ? [Math.min(last.sp[0], s.sp[0]), Math.max(last.sp[1], s.sp[1])] : s.sp; } else stops.push({ ent: s.ent, pt: s.pt, scenes: [s.n], sp: s.sp }); });
+  /* distances and speed */
+  const km = +m.km || 0, perDay = +m.kmday || 40, warns = [];
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1], b = stops[i];
+    const d = km ? Math.hypot((b.pt.x - a.pt.x) * m.w, (b.pt.y - a.pt.y) * m.h) / m.w * km : 0; b.km = d;
+    if (km && a.sp && b.sp) {
+      const days = (b.sp[0] - a.sp[1]) * yearDays(); b.days = days;
+      if (d > 1 && days < d / perDay - .01) warns.push({ i, txt: days <= 0 ? tl("{x} → {x}: na cestu ({x} km) nezostal žiadny čas.", S.ents[a.ent].name, S.ents[b.ent].name, Math.round(d)) : tl("{x} → {x}: {x} km za {x} dní – to je {x} km za deň.", S.ents[a.ent].name, S.ents[b.ent].name, Math.round(d), Math.max(1, Math.round(days)), Math.round(d / Math.max(days, .1))) });
+    }
+  }
+  return { stops, warns };
+}
+function tripColor(id) { const i = entsBy("postava").findIndex(c => c.id === id); return TL_COLORS[(i < 0 ? 0 : i) % TL_COLORS.length]; }
+function tripSvg(m, u) {
+  if (!u.tripsOpen || !u.trips || !u.trips.size) return "";
+  const M = mapUnit(m), out = [], ids = [...u.trips].filter(id => S.ents[id]);
+  ids.forEach((id, k) => {
+    const { stops } = tripOf(S.ents[id], m, u.tripChrono), col = tripColor(id), off = (k - (ids.length - 1) / 2) * M / 260;
+    if (!stops.length) return;
+    const pts = stops.map(s => [s.pt.x * m.w + off, s.pt.y * m.h + off]);
+    if (pts.length > 1) out.push(`<path d="M${pts.map(p => p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" L")}" fill="none" stroke="${col}" stroke-width="${(M / 260).toFixed(1)}" stroke-dasharray="${(M / 90).toFixed(1)} ${(M / 160).toFixed(1)}" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`);
+    for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], mx = (x0 + x1) / 2, my = (y0 + y1) / 2, ang = Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI, s = M / 120; if (Math.hypot(x1 - x0, y1 - y0) > s * 3) out.push(`<path d="M${-s} ${-s * .7} L${s * .6} 0 L${-s} ${s * .7}z" fill="${col}" transform="translate(${mx.toFixed(1)} ${my.toFixed(1)}) rotate(${ang.toFixed(1)})"/>`); }
+    pts.forEach((p, i) => { const r = M / 70; out.push(`<g><circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${r.toFixed(1)}" fill="${col}" stroke="#fff" stroke-width="${(r / 5).toFixed(1)}"/><text x="${p[0].toFixed(1)}" y="${(p[1] + r * .38).toFixed(1)}" text-anchor="middle" font-size="${(r * 1.05).toFixed(1)}" font-weight="700" font-family="Helvetica, Arial, sans-serif" fill="#fff">${i + 1}</text></g>`); });
+  });
+  return `<g class="mtrips" pointer-events="none">${out.join("")}</g>`;
+}
+function mountTrips(box, e, u, redraw) {
+  if (!box) return;
+  const m = e.map; u.trips = u.trips || new Set();
+  if (!u.tripsOpen) { box.innerHTML = ""; return; }
+  const P = tripPlaces(m), cands = entsBy("postava").map(c => ({ c, n: tripOf(c, m, u.tripChrono).stops.length })).filter(x => x.n > 0);
+  const sel = [...u.trips].filter(id => S.ents[id]);
+  box.innerHTML = `<div class="trips">
+    <div class="trips-h"><b>${esc(tl("Cesty postáv"))}</b><span class="hint">${esc(tl("Trasa spája miesta zo scén, v ktorých postava vystupuje (miesto deja scény alebo miesto priradené ku scéne, ak je na tejto mape)."))}</span></div>
+    ${Object.keys(P).length ? "" : `<p class="hint">${esc(tl("Na mape zatiaľ nie je žiadne miesto prepojené so Svetom. Prepoj špendlíky alebo oblasti s miestami a tie priraď ku scénam."))}</p>`}
+    <div class="chips">${cands.map(({ c, n }) => `<label class="chip chk"><input type="checkbox" data-trip="${c.id}"${u.trips.has(c.id) ? " checked" : ""}><i class="dot" style="background:${tripColor(c.id)}"></i><span class="no-tr">${esc(c.name)}</span>&nbsp;<small class="hint">${n}</small></label>`).join("") || (Object.keys(P).length ? `<span class="hint">${esc(tl("Žiadna postava zatiaľ nevystupuje v scéne s miestom z tejto mapy."))}</span>` : "")}</div>
+    <div class="trips-set"><label class="field"><span>${esc(tl("Poradie"))}</span><select class="inp" id="trOrd"><option value="">${esc(tl("ako v knihe"))}</option><option value="1"${u.tripChrono ? " selected" : ""}>${esc(tl("podľa času deja"))}</option></select></label>
+      <label class="field"><span>${esc(tl("Mierka: šírka mapy v km"))}</span><input class="inp mono" id="trKm" type="number" min="0" step="10" value="${m.km || ""}" placeholder="${esc(tl("napr. 800"))}"></label>
+      <label class="field"><span>${esc(tl("Rýchlosť cestovania (km za deň)"))}</span><input class="inp mono" id="trSpd" type="number" min="1" step="5" value="${m.kmday || 40}"></label></div>
+    ${sel.map(id => { const c = S.ents[id], t = tripOf(c, m, u.tripChrono); return `<div class="trip-list"><div class="lbl"><i class="dot" style="background:${tripColor(id)}"></i><span class="no-tr">${esc(c.name)}</span></div><ol>${t.stops.map((s, i) => `<li><b class="no-tr">${esc(S.ents[s.ent].name)}</b> <span class="hint">${s.scenes.map(n => `<button class="lnk" data-trgo="${n.id}">${esc(n.title || tl("Bez názvu"))}</button>`).join(", ")}${s.km ? " · " + Math.round(s.km) + " km" : ""}${s.sp ? " · " + esc(trange(s.scenes[0].time)) : ""}</span></li>`).join("")}</ol>${t.warns.map(w => `<div class="tripwarn">! ${esc(w.txt)}</div>`).join("")}${u.tripChrono && t.stops.length < tripOf(c, m, false).stops.length ? `<p class="hint">${esc(tl("Podľa času deja sa zobrazujú len scény, ktoré majú čas."))}</p>` : ""}</div>`; }).join("")}
+    ${!m.km && sel.length ? `<p class="hint">${esc(tl("Zadaj mierku a Kronikár spočíta vzdialenosti a upozorní, keď by postava za daný čas nestihla prejsť cestu."))}</p>` : ""}
+  </div>`;
+  const again = () => { mountTrips(box, e, u, redraw); redraw(); };
+  $$("[data-trip]", box).forEach(i => i.onchange = () => { if (i.checked) u.trips.add(i.dataset.trip); else u.trips.delete(i.dataset.trip); again(); });
+  $("#trOrd", box).onchange = ev => { u.tripChrono = !!ev.target.value; again(); };
+  $("#trKm", box).onchange = ev => { const v = +ev.target.value; if (v > 0) m.km = v; else delete m.km; saveEnt(e.id); again(); };
+  $("#trSpd", box).onchange = ev => { const v = +ev.target.value; if (v > 0) m.kmday = v; else delete m.kmday; saveEnt(e.id); again(); };
+  $$("[data-trgo]", box).forEach(b => b.onclick = () => goScene(b.dataset.trgo));
+}
+
+/* ---------- 4/5. appendices of the exported book: characters, maps (front), family tree, glossary (back) ---------- */
+const ROLE_ORDER = () => (CAT.postava.fields.find(f => typeof f === "object" && f.key)?.opts || []).map(x => relNorm(x).slice(0, 6));
+function appendixPeople() {
+  const ro = ROLE_ORDER(), role = c => (keyFieldOf(c)?.v || "").trim(), rk = c => { const i = ro.indexOf(relNorm(role(c)).slice(0, 6)); return i < 0 ? (role(c) ? ro.length : ro.length + 1) : i; };
+  return entsBy("postava").filter(c => (c.name || "").trim()).sort((a, b) => rk(a) - rk(b) || a.name.localeCompare(b.name, "sk")).map(c => ({ h: c.name + (nicksOf(c).length ? " („" + nicksOf(c).join("“, „") + "“)" : ""), sub: role(c), text: (c.summary || "").trim() }));
+}
+function appendixGlossary() {
+  return entsBy("pojem").filter(c => (c.name || "").trim()).sort((a, b) => a.name.localeCompare(b.name, "sk")).map(c => { const f = c.fields || {}, pr = (f["Výslovnosť"] || "").trim(); return { h: c.name, sub: pr ? "[" + pr.replace(/^\[|\]$/g, "") + "]" : "", text: [(f["Význam"] || "").trim() || (c.summary || "").trim(), (f["Jazyk / pôvod"] || "").trim()].filter(Boolean).join(" · ") }; });
+}
+async function appendixData() {
+  const a = S.exportOnly ? {} : (S.p.exp.app || {}), front = [], back = [];
+  for (const id of a.maps || []) {
+    const e = S.ents[id]; if (!e || !e.map || (!e.map.img && !e.map.bg)) continue;
+    try { const f = Math.min(1, 2400 / Math.max(e.map.w, e.map.h)), c = await renderMapCanvas(e, { f }); front.push({ kind: "img", title: e.name || tlb("Mapa"), url: c.toDataURL("image/jpeg", .9), ext: "jpg", w: c.width, h: c.height }); }
+    catch (err) { console.warn("map appendix", err); }
+  }
+  if (a.people) { const rows = appendixPeople(); if (rows.length) front.push({ kind: "list", title: tlb("Postavy"), rows }); }
+  if (a.tree) { const F = famData(); if (F.nodes.length) { const r = famSvg(F, famLayout(F), PAL_PRINT), c = await svgToPng(r.svg, r.W, r.H, 2); back.push({ kind: "img", title: tlb("Rodokmeň"), url: c.toDataURL("image/png"), ext: "png", w: c.width, h: c.height }); } }
+  if (a.glossary) { const rows = appendixGlossary(); if (rows.length) back.push({ kind: "list", title: tlb("Slovníček"), rows }); }
+  return { front, back };
+}
+const dataUrlBytes = u => { const b = atob(u.split(",")[1]), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; };
+/* pdfmake nodes */
+function appendixPdf(secs, c, maxH) {
+  const out = [];
+  secs.forEach(s => {
+    out.push({ text: s.title, fontSize: c.fs * 1.5, alignment: "center", font: c.headKey, margin: [0, c.ht, 0, c.fs * 1.6], pageBreak: "before" });
+    if (s.kind === "img") out.push({ image: s.url, fit: [c.cw, maxH], alignment: "center" });
+    else s.rows.forEach(r => out.push({ stack: [{ text: [{ text: r.h, bold: true }, r.sub ? { text: "  " + r.sub, italics: true, color: c.gray } : ""] }, r.text ? { text: r.text, margin: [c.fs, c.fs * .15, 0, 0] } : null].filter(Boolean), margin: [0, 0, 0, c.fs * .7], unbreakable: true, alignment: "left" }));
+  });
+  return out;
+}
+/* Word paragraphs; media collects the image files */
+function appendixDocx(secs, fs, maxW, maxH, media) {
+  const out = [];
+  secs.forEach(s => {
+    out.push(xp(xr(s.title, { b: true, sz: fs * 1.4 }), { style: "Heading1", pb: true }));
+    if (s.kind === "img") {
+      const k = Math.min(maxW / s.w, maxH / s.h), cx = Math.round(s.w * k * 12700), cy = Math.round(s.h * k * 12700), n = media.length + 1, rid = "rIdM" + n, name = "img" + n + "." + s.ext;
+      media.push({ name, rid, data: dataUrlBytes(s.url), ext: s.ext });
+      out.push(`<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="${esc(s.title)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${n}" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`);
+    } else s.rows.forEach(r => { out.push(xp(xr(r.h, { b: true }) + (r.sub ? xr("  " + r.sub, { i: true, color: "6E6E6E" }) : ""), { after: r.text ? 20 : 140, keep: !!r.text })); if (r.text) out.push(xp(xr(r.text), { after: 140 })); });
+  });
+  return out;
+}
+/* EPUB pages (XHTML body) */
+function appendixEpub(secs, add, media, toc, pre) {
+  secs.forEach((s, i) => {
+    const name = pre + (i + 1) + ".xhtml";
+    let body;
+    if (s.kind === "img") { const f = "img/" + pre + (i + 1) + "." + s.ext; media.push({ id: (pre + (i + 1) + "img").replace(/\W/g, "_"), name: f, data: dataUrlBytes(s.url), type: s.ext === "png" ? "image/png" : "image/jpeg" }); body = `<div class="img"><img src="${f}" alt="${esc(s.title)}"/></div>`; }
+    else body = `<dl class="gl">${s.rows.map(r => `<dt>${esc(r.h)}${r.sub ? ` <span class="pr">${esc(r.sub)}</span>` : ""}</dt>${r.text ? `<dd>${esc(r.text)}</dd>` : "<dd></dd>"}`).join("")}</dl>`;
+    add(name, s.title, `<section epub:type="appendix"><h1>${esc(s.title)}</h1>${body}</section>`);
+    toc.push({ label: s.title, href: name, kids: [] });
+  });
+}
+function appendixCard() {
+  const a = S.p.exp.app || {}, maps = entsBy("mapa").filter(e => e.map && (e.map.img || e.map.bg)), nGl = entsBy("pojem").length, F = famData();
+  return `<div class="card" id="appCard"><h3>${esc(tl("Prílohy knihy"))}</h3><p class="hint">${esc(tl("Pridajú sa do celej knihy aj do verzie pre beta čitateľov (PDF, Word, EPUB). Mapy a postavy na začiatok, rodokmeň a slovníček na koniec."))}</p>
+    ${maps.map(m => `<label class="chk"><input type="checkbox" data-appmap="${m.id}"${(a.maps || []).includes(m.id) ? " checked" : ""}> ${esc(tl("Mapa"))}: <span class="no-tr">${esc(m.name || tl("Bez názvu"))}</span></label>`).join("")}
+    <label class="chk"><input type="checkbox" data-app="people"${a.people ? " checked" : ""}> ${esc(tl("Zoznam postáv s úlohou a krátkym popisom"))} <small class="hint">(${entsBy("postava").length})</small></label>
+    <label class="chk"><input type="checkbox" data-app="tree"${a.tree ? " checked" : ""}${F.nodes.length ? "" : " disabled"}> ${esc(tl("Rodokmeň"))} ${F.nodes.length ? "" : `<small class="hint">${esc(tl("(zatiaľ bez rodinných vzťahov)"))}</small>`}</label>
+    <label class="chk"><input type="checkbox" data-app="glossary"${a.glossary ? " checked" : ""}${nGl ? "" : " disabled"}> ${esc(tl("Slovníček pojmov"))} ${nGl ? `<small class="hint">(${nGl})</small>` : `<small class="hint">${esc(tl("(pojmy pridáš vo Svete → Slovník)"))}</small>`}</label>
+  </div>`;
+}
+function bindAppendixCard(root) {
+  const a = () => (S.p.exp.app = S.p.exp.app || {});
+  $$("[data-app]", root).forEach(i => i.onchange = () => { a()[i.dataset.app] = i.checked; saveProject(); });
+  $$("[data-appmap]", root).forEach(i => i.onchange = () => { const s = new Set(a().maps || []); if (i.checked) s.add(i.dataset.appmap); else s.delete(i.dataset.appmap); a().maps = [...s]; saveProject(); });
+}
+
+/* ---------- 6. plot threads: S.p.threads = [{id, t, note, set: [nodeId], pay: [nodeId], open}] ---------- */
+const threads = () => (S.p.threads = S.p.threads || []);
+const nodeOk = id => !!findNode(id);
+function threadState(th) {
+  const set = (th.set || []).filter(nodeOk), pay = (th.pay || []).filter(nodeOk), ord = readOrder();
+  const first = l => Math.min(...l.map(id => ord.get(id)));
+  const warn = set.length && pay.length && first(pay) < first(set) ? tl("Rozuzlenie je v knihe skôr ako zápletka.") : "";
+  return { set, pay, st: pay.length ? "done" : th.open ? "kept" : "open", warn };
+}
+const TH_ST = { open: ["Otvorená", "warn"], done: ["Vyriešená", "ok"], kept: ["Zámerne otvorená", "soft"] };
+const nodeChips = (ids, attr) => ids.map(id => `<span class="chip"><button class="lnk" data-ngo="${id}">${I.doc} ${esc(evNodeLabel(id))}</button><button class="x" data-${attr}="${id}" aria-label="${esc(tl("Odobrať"))}">×</button></span>`).join("");
+const TT = { filter: "open", edit: null };
+function renderThreadsTool(pg) {
+  const list = threads(), states = list.map(th => [th, threadState(th)]), nOpen = states.filter(([, s]) => s.st === "open").length;
+  const shown = states.filter(([, s]) => TT.filter === "all" || s.st === "open" || (TT.filter === "open" && s.warn));
+  pg.innerHTML = `<h2>${esc(tl("Nitky deja"))}</h2><p class="hint" style="max-width:70ch">${esc(tl("Zápletky, náznaky a tajomstvá, ktoré treba v knihe niekde rozuzliť. Ku každej nitke označ kapitolu, kde ju nastolíš, a kapitolu, kde ju vyriešiš – otvorené nitky budú vždy po ruke. Dá sa to aj priamo v inšpektore scény."))}</p>
+    <div class="btnrow"><div class="segs small"><button class="seg${TT.filter === "open" ? " on" : ""}" data-thf="open">${esc(tl("Otvorené"))} <b class="mono">${nOpen || ""}</b></button><button class="seg${TT.filter === "all" ? " on" : ""}" data-thf="all">${esc(tl("Všetky"))} <b class="mono">${list.length || ""}</b></button></div><span class="spacer"></span></div>
+    <div class="th-add"><input class="inp" id="thNew" placeholder="${esc(tl("Nová nitka, napr. Kto poslal list bez podpisu?"))}" autocomplete="off"><button class="btn primary" id="thAdd">${I.plus}${esc(tl("Pridať"))}</button></div>
+    <div class="th-list">${shown.map(([th, s]) => `<div class="th-card st-${s.st}" data-th="${th.id}">
+      <div class="th-h"><input class="inp th-t no-tr" data-tht value="${esc(th.t)}"><span class="badge ${TH_ST[s.st][1]}">${esc(tl(TH_ST[s.st][0]))}</span><button class="btn icon ghost sm" data-thdel title="${esc(tl("Zmazať"))}" aria-label="${esc(tl("Zmazať"))}">×</button></div>
+      ${s.warn ? `<div class="tripwarn">! ${esc(s.warn)}</div>` : ""}
+      <div class="th-row"><span class="lbl">${esc(tl("Nastolené v"))}</span><div class="chips">${nodeChips(s.set, "thrs")}<select class="inp sm" data-thadd="set"><option value="">${esc(tl("+ kapitola alebo scéna…"))}</option>${evOptions()}</select></div></div>
+      <div class="th-row"><span class="lbl">${esc(tl("Vyriešené v"))}</span><div class="chips">${nodeChips(s.pay, "thrp")}<select class="inp sm" data-thadd="pay"><option value="">${esc(tl("+ kapitola alebo scéna…"))}</option>${evOptions()}</select></div></div>
+      <details class="th-more"${th.note ? " open" : ""}><summary>${esc(tl("Poznámka"))}</summary><textarea class="inp no-tr" data-thn rows="2" placeholder="${esc(tl("Ako to rozuzlím, čo s tým súvisí…"))}">${esc(th.note || "")}</textarea></details>
+      ${s.pay.length ? "" : `<label class="chk"><input type="checkbox" data-thkeep${th.open ? " checked" : ""}> ${esc(tl("Nechávam zámerne otvorené (napr. pre pokračovanie)"))}</label>`}
+    </div>`).join("") || `<p class="hint">${esc(list.length ? tl("Všetky nitky sú vyriešené.") : tl("Zatiaľ žiadne nitky."))}</p>`}</div>`;
+  const again = () => renderThreadsTool(pg), sv = () => { saveProject(); again(); };
+  $$("[data-thf]", pg).forEach(b => b.onclick = () => { TT.filter = b.dataset.thf; again(); });
+  const add = () => { const v = $("#thNew", pg).value.trim(); if (!v) return; threads().push({ id: uid("th"), t: v, set: [], pay: [] }); TT.filter = "all"; sv(); };
+  $("#thAdd", pg).onclick = add; $("#thNew", pg).onkeydown = ev => { if (ev.key === "Enter") add(); };
+  $$("[data-th]", pg).forEach(card => {
+    const th = threads().find(x => x.id === card.dataset.th);
+    $("[data-tht]", card).onchange = ev => { th.t = ev.target.value.trim() || th.t; saveProject(); };
+    $("[data-thn]", card).oninput = debounce(ev => { th.note = ev.target.value; saveProject(); }, 400);
+    $("[data-thdel]", card).onclick = () => { S.p.threads = threads().filter(x => x !== th); sv(); };
+    $$("[data-thadd]", card).forEach(s => s.onchange = () => { if (!s.value) return; const k = s.dataset.thadd; th[k] = [...new Set([...(th[k] || []), s.value])]; if (k === "pay") delete th.open; sv(); });
+    $$("[data-thrs]", card).forEach(b => b.onclick = () => { th.set = th.set.filter(x => x !== b.dataset.thrs); sv(); });
+    $$("[data-thrp]", card).forEach(b => b.onclick = () => { th.pay = th.pay.filter(x => x !== b.dataset.thrp); sv(); });
+    $("[data-thkeep]", card)?.addEventListener("change", ev => { th.open = ev.target.checked || undefined; sv(); });
+    $$("[data-ngo]", card).forEach(b => b.onclick = () => goNode(b.dataset.ngo));
+  });
+}
+function goNode(id) { const f = findNode(id); if (!f) return; if (f.parent) setOpen(f.parent, true); S.tool = null; S.sel = id; setMode("write"); }
+
+/* ---------- 7. who knows what: S.p.secrets = [{id, t, note, reader: nodeId, know: {charId: nodeId | "start"}}] ---------- */
+const secrets = () => (S.p.secrets = S.p.secrets || []);
+const knowsAt = (sec, cid, nodeId, ord) => { const k = (sec.know || {})[cid]; if (!k) return false; if (k === "start") return true; if (!nodeOk(k)) return false; return ord.get(k) <= ord.get(nodeId); };
+function renderSecretsTool(pg) {
+  const people = entsBy("postava").slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "sk")), opts = evOptions();
+  pg.innerHTML = `<h2>${esc(tl("Kto čo vie"))}</h2><p class="hint" style="max-width:70ch">${esc(tl("Tajomstvá a dôležité informácie: od ktorej kapitoly ich ktorá postava pozná a kedy sa ich dozvie čitateľ. V inšpektore scény potom uvidíš, kto z prítomných už čo vie. Počíta sa poradie v knihe."))}</p>
+    <div class="th-add"><input class="inp" id="seNew" placeholder="${esc(tl("Nové tajomstvo, napr. Ilsin otec je kňaz Siedmich plameňov"))}" autocomplete="off"><button class="btn primary" id="seAdd">${I.plus}${esc(tl("Pridať"))}</button></div>
+    <div class="th-list">${secrets().map(se => { const know = Object.entries(se.know || {}).filter(([cid]) => S.ents[cid]); return `<div class="th-card" data-se="${se.id}">
+      <div class="th-h"><input class="inp th-t no-tr" data-set value="${esc(se.t)}"><button class="btn icon ghost sm" data-sedel title="${esc(tl("Zmazať"))}" aria-label="${esc(tl("Zmazať"))}">×</button></div>
+      <div class="th-row"><span class="lbl">${esc(tl("Čitateľ sa dozvie v"))}</span><select class="inp sm" data-ser><option value="">${esc(tl("— zatiaľ nie —"))}</option>${opts.replace(`value="${se.reader}"`, `value="${se.reader}" selected`)}</select></div>
+      <div class="th-row"><span class="lbl">${esc(tl("Postavy, ktoré to vedia"))}</span><div class="se-know">${know.map(([cid, k]) => `<div class="se-k"><span class="no-tr">${esc(S.ents[cid].name)}</span><span class="hint">${esc(tl("vie od"))}</span><select class="inp sm" data-sek="${cid}"><option value="start"${k === "start" ? " selected" : ""}>${esc(tl("začiatku knihy"))}</option>${opts.replace(`value="${k}"`, `value="${k}" selected`)}</select><button class="btn icon ghost sm" data-serm="${cid}" aria-label="${esc(tl("Odobrať"))}">×</button></div>`).join("")}
+        <div class="se-k add"><select class="inp sm" data-seadd><option value="">${esc(tl("+ postava, ktorá to vie…"))}</option>${people.filter(c => !(se.know || {})[c.id]).map(c => `<option value="${c.id}">${esc(c.name || tl("Bez mena"))}</option>`).join("")}</select></div></div></div>
+      <details class="th-more"${se.note ? " open" : ""}><summary>${esc(tl("Poznámka"))}</summary><textarea class="inp no-tr" data-sen rows="2">${esc(se.note || "")}</textarea></details>
+    </div>`; }).join("") || `<p class="hint">${esc(tl("Zatiaľ žiadne tajomstvá."))}</p>`}</div>`;
+  const again = () => renderSecretsTool(pg), sv = () => { saveProject(); again(); };
+  const add = () => { const v = $("#seNew", pg).value.trim(); if (!v) return; secrets().push({ id: uid("se"), t: v, know: {} }); sv(); };
+  $("#seAdd", pg).onclick = add; $("#seNew", pg).onkeydown = ev => { if (ev.key === "Enter") add(); };
+  $$("[data-se]", pg).forEach(card => {
+    const se = secrets().find(x => x.id === card.dataset.se); se.know = se.know || {};
+    $("[data-set]", card).onchange = ev => { se.t = ev.target.value.trim() || se.t; saveProject(); };
+    $("[data-sen]", card).oninput = debounce(ev => { se.note = ev.target.value; saveProject(); }, 400);
+    $("[data-sedel]", card).onclick = () => { S.p.secrets = secrets().filter(x => x !== se); sv(); };
+    $("[data-ser]", card).onchange = ev => { if (ev.target.value) se.reader = ev.target.value; else delete se.reader; saveProject(); };
+    $$("[data-sek]", card).forEach(s => s.onchange = () => { se.know[s.dataset.sek] = s.value; saveProject(); });
+    $$("[data-serm]", card).forEach(b => b.onclick = () => { delete se.know[b.dataset.serm]; sv(); });
+    $("[data-seadd]", card).onchange = ev => { if (!ev.target.value) return; se.know[ev.target.value] = "start"; sv(); };
+  });
+}
+
+/* ---------- inspector of a scene / chapter: threads and secrets here ---------- */
+function mountNodeStory(el, n) {
+  const tb = $("#iThreads", el), sb = $("#iSecrets", el);
+  if (tb) {
+    const here = new Set([n.id]); const f = findNode(n.id); if (f && f.parent && n.type === "text") here.add(f.parent.id);
+    const rows = threads().map(th => ({ th, s: (th.set || []).some(id => here.has(id)), p: (th.pay || []).some(id => here.has(id)) })).filter(x => x.s || x.p);
+    const open = threads().filter(th => threadState(th).st === "open" && !rows.some(r => r.th === th));
+    tb.innerHTML = `<span class="lbl">${esc(tl("Nitky deja"))}</span>${rows.map(r => `<div class="nev" data-thgo role="button"><b class="no-tr">${esc(r.th.t)}</b> <span class="hint">${esc([r.s ? tl("nastolené tu") : "", r.p ? tl("vyriešené tu") : ""].filter(Boolean).join(" · "))}</span></div>`).join("")}
+      <div class="th-quick"><select class="inp sm" id="iThSel"><option value="">${esc(tl("Nitka…"))}</option>${threads().map(th => `<option value="${th.id}">${esc(th.t)}${threadState(th).st === "open" ? " •" : ""}</option>`).join("")}<option value="new">${esc(tl("+ nová nitka…"))}</option></select><input class="inp sm" id="iThNew" placeholder="${esc(tl("Názov novej nitky"))}" hidden autocomplete="off"><button class="btn sm" data-thq="set">${esc(tl("Nastolené tu"))}</button><button class="btn sm" data-thq="pay">${esc(tl("Vyriešené tu"))}</button></div>
+      <button class="lnk hint" id="iThAll">${esc(threads().length ? tl("Všetky nitky deja ({x}, otvorené: {x})", threads().length, threads().filter(th => threadState(th).st === "open").length) : tl("Prehľad nitiek deja"))} →</button>`;
+    $$("[data-thq]", tb).forEach(b => b.onclick = () => {
+      let id = $("#iThSel", tb).value; if (!id) { toast(tl("Vyber nitku.")); return; }
+      if (id === "new") { const t = $("#iThNew", tb).value.trim(); if (!t) { toast(tl("Napíš názov nitky.")); $("#iThNew", tb).focus(); return; } const th = { id: uid("th"), t, set: [], pay: [] }; threads().push(th); id = th.id; }
+      const th = threads().find(x => x.id === id), k = b.dataset.thq; th[k] = [...new Set([...(th[k] || []), n.id])]; if (k === "pay") delete th.open; saveProject(); mountNodeStory(el, n); toast(tl("Uložené."));
+    });
+    $("#iThSel", tb).onchange = ev => { const ni = $("#iThNew", tb); ni.hidden = ev.target.value !== "new"; if (!ni.hidden) ni.focus(); };
+    $("#iThAll", tb)?.addEventListener("click", () => openTools("threads"));
+    $$("[data-thgo]", tb).forEach(d => d.onclick = () => { TT.filter = "all"; openTools("threads"); });
+  }
+  if (sb) {
+    const list = secrets(); if (!list.length || n.type !== "text") { sb.innerHTML = list.length ? "" : `<span class="lbl">${esc(tl("Kto čo vie"))}</span><button class="lnk hint" id="iSeOpen">${esc(tl("Zapísať tajomstvá a kto ich pozná…"))}</button>`; $("#iSeOpen", sb)?.addEventListener("click", () => openTools("secrets")); if (!list.length && n.type !== "text") sb.innerHTML = ""; return; }
+    const ord = readOrder(), ppl = scenePresent(n);
+    const rows = list.map(se => { const k = ppl.filter(c => knowsAt(se, c.id, n.id, ord)), nk = ppl.filter(c => !knowsAt(se, c.id, n.id, ord)), rd = se.reader && nodeOk(se.reader) && ord.get(se.reader) <= ord.get(n.id); return { se, k, nk, rd }; }).filter(r => r.k.length || Object.keys(r.se.know || {}).some(cid => ppl.some(c => c.id === cid)));
+    sb.innerHTML = `<span class="lbl">${esc(tl("Kto čo vie"))}</span>${rows.length ? rows.map(r => `<div class="nev"><b class="no-tr">${esc(r.se.t)}</b>${r.rd ? ` <span class="badge soft">${esc(tl("čitateľ vie"))}</span>` : ""}<div class="hint">${r.k.length ? esc(tl("vie: {x}", r.k.map(c => c.name).join(", "))) : ""}${r.k.length && r.nk.length ? " · " : ""}${r.nk.length ? `<span class="nk">${esc(tl("ešte nevie: {x}", r.nk.map(c => c.name).join(", ")))}</span>` : ""}</div></div>`).join("") : `<span class="hint">${esc(tl("Nikto z prítomných nepozná žiadne zo zapísaných tajomstiev."))}</span>`}<button class="lnk hint" id="iSeOpen">${esc(tl("Upraviť tajomstvá…"))}</button>`;
+    $("#iSeOpen", sb).onclick = () => openTools("secrets");
+  }
+}
+</script>

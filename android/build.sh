@@ -13,7 +13,7 @@ ALIAS="${KRONIKAR_KEY_ALIAS:-kronikar}"
 AJ=/usr/lib/android-sdk/platforms/android-23/android.jar
 rm -rf gen classes out && mkdir -p gen classes out
 aapt package -f -m -J gen -M AndroidManifest.xml -S res -I $AJ
-javac -nowarn --release 8 -classpath $AJ -d classes gen/sk/kronikar/app/R.java src/sk/kronikar/app/MainActivity.java
+javac -nowarn --release 8 -classpath $AJ -d classes gen/sk/kronikar/app/R.java src/sk/kronikar/app/*.java
 dalvik-exchange --dex --min-sdk-version=24 --output=out/classes.dex classes
 aapt package -f -M AndroidManifest.xml -S res -A assets -I $AJ -F out/app.unsigned.apk
 (cd out && aapt add app.unsigned.apk classes.dex >/dev/null)

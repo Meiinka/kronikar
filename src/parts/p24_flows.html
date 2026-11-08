@@ -1,0 +1,114 @@
+<style>
+/* ---- 1.29: magical currents – where they are, how dense, what structure; colour layer on maps ---- */
+.flowhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.flowhead input[type=color]{width:38px;height:30px;border:1px solid var(--line);border-radius:6px;padding:2px;background:var(--paper)}
+.flowtab{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.flowrow{display:grid;grid-template-columns:minmax(120px,1.1fr) auto minmax(0,1.2fr) minmax(0,1fr) auto;gap:8px;align-items:center}
+.flowrow.head{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.flowrow .src{display:flex;align-items:center;gap:6px;min-width:0}
+.flowrow .src .lnk{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.dens{display:inline-flex;gap:3px}
+.dens button{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--fc,var(--ink-3));background:transparent;padding:0;cursor:pointer}
+.dens button.on{background:var(--fc,var(--ink-3))}
+.dens.ro button{cursor:default}
+.flowmix{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--line-2);margin:4px 0 2px}
+.flowmix i{display:block;height:100%}
+.flowadd{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin-top:6px}
+.fdot{width:12px;height:12px;border-radius:50%;flex:none;display:inline-block;border:1px solid rgba(0,0,0,.15)}
+@media (max-width:640px){.flowrow{grid-template-columns:1fr auto auto}.flowrow .st,.flowrow .nt{grid-column:1 / -1}.flowrow [data-occrm],.flowrow [data-hrm]{grid-row:1;grid-column:3}.flowrow.head{display:none}}
+.mapflows{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:6px 0;background:var(--panel);display:flex;flex-direction:column;gap:8px}
+.mapflows .chips .chip{cursor:pointer}
+.mapflows .chip.on{outline:2px solid var(--accent)}
+</style>
+<script>
+/* ================= magical currents (category "prud") =================
+   current entry: e.color, e.occ = [{id, src: entId | null, txt, d: 0–5 (density / saturation), st: structure here, note}] */
+const FLOW_GUESS = [[/vod|water|mor|sea/, "#2F7FD0"], [/vzduch|vietor|air|wind/, "#9FC9E3"], [/zem|kame|earth|stone/, "#8A6A3A"], [/ohe|plam|fire|flame/, "#D2502A"], [/zivot|život|life/, "#4FA04A"], [/smrt|death|tien|tieň|shadow/, "#5B4A7A"], [/svetl|light|slnk/, "#E2B93B"], [/striebr|silver/, "#A9B3BD"]];
+const FLOW_PAL = ["#2F7FD0", "#4FA04A", "#D2502A", "#8A6A3A", "#9FC9E3", "#A04BB0", "#E2B93B", "#2F8F83", "#C0563A", "#6B5BB5"];
+function flowColor(e) { if (e.color) return e.color; const n = norm(e.name || ""); const g = FLOW_GUESS.find(([re]) => re.test(n)); if (g) return g[1]; const i = entsBy("prud").findIndex(x => x.id === e.id); return FLOW_PAL[(i < 0 ? 0 : i) % FLOW_PAL.length]; }
+const flows = () => entsBy("prud");
+const occOf = e => (e.occ = e.occ || []);
+/* all currents present in a source entry, densest first */
+function flowsIn(srcId) { const out = []; flows().forEach(f => (f.occ || []).forEach(o => { if (o.src === srcId) out.push({ f, o }); })); return out.sort((a, b) => (b.o.d || 0) - (a.o.d || 0)); }
+const densHtml = (d, attr, col, ro) => `<span class="dens${ro ? " ro" : ""}" style="--fc:${col}" ${attr}>${[1, 2, 3, 4, 5].map(i => `<button type="button" class="${i <= (d || 0) ? "on" : ""}" data-dv="${i}" aria-label="${i}"${ro ? " tabindex=\"-1\"" : ""}></button>`).join("")}</span>`;
+function bindDens(box, sel, get, set) { $$(sel, box).forEach(span => $$("[data-dv]", span).forEach(b => b.onclick = () => { const v = +b.dataset.dv, cur = get(span); set(span, cur === v ? v - 1 : v); })); }
+const mixHtml = list => { const tot = list.reduce((s, x) => s + (x.o.d || 0), 0); return tot ? `<div class="flowmix" title="${esc(list.map(x => x.f.name + " " + (x.o.d || 0) + "/5").join(", "))}">${list.filter(x => x.o.d).map(x => `<i style="width:${(x.o.d / tot * 100).toFixed(1)}%;background:${flowColor(x.f)};opacity:${(.35 + x.o.d * .13).toFixed(2)}"></i>`).join("")}</div>` : ""; };
+const srcOptions = (exclude = []) => CATS.filter(c => c.id !== "prud" && c.id !== "mapa").map(c => { const es = entsBy(c.id).filter(x => !exclude.includes(x.id)); return es.length ? `<optgroup label="${esc(c.name)}">${es.map(x => `<option value="${x.id}">${esc(x.name || tl("Bez mena"))}</option>`).join("")}</optgroup>` : ""; }).join("");
+
+/* card in a current's own entry: colour + where it occurs */
+function mountFlowCard(box, e) {
+  if (!box) return;
+  if (e.cat === "prud") return mountFlowOwn(box, e);
+  if (e.cat === "mapa" || !flows().length) { box.remove(); return; }
+  mountFlowHere(box, e);
+}
+function mountFlowOwn(box, e) {
+  const col = flowColor(e), list = occOf(e);
+  box.innerHTML = `<h3>${esc(tl("Výskyt a hustota"))} ${list.length ? `<span class="mono" style="letter-spacing:0">${list.length}</span>` : ""}</h3>
+    <div class="flowhead"><label class="chk"><input type="color" id="flowCol" value="${esc(col)}"> ${esc(tl("Farba prúdu"))}</label><span class="hint">${esc(tl("Hustota 0–5 je aj sýtosť farby – na púšti bledý, na mori sýty."))}</span><span class="spacer" style="flex:1"></span><button class="btn sm" id="flowPortal">${I.pin}${esc(tl("Hľadať miesto pre portál"))}</button></div>
+    <div class="flowtab">${list.length ? `<div class="flowrow head"><span>${esc(tl("Zdroj / miesto"))}</span><span>${esc(tl("Hustota"))}</span><span>${esc(tl("Štruktúra tu"))}</span><span>${esc(tl("Poznámka"))}</span><span></span></div>` : ""}
+      ${list.map(o => { const s = o.src && S.ents[o.src]; return `<div class="flowrow" data-occ="${o.id}"><span class="src">${s ? `<span class="cd" style="background:${catColor(s.cat)}"></span><button class="lnk no-tr" data-occgo="${s.id}">${esc(s.name || tl("Bez mena"))}</button>` : `<input class="inp sm no-tr" data-occtxt value="${esc(o.txt || "")}" placeholder="${esc(tl("napr. voda, púšť"))}">`}</span>${densHtml(o.d, "data-occd", col)}<input class="inp sm st no-tr" data-occst value="${esc(o.st || "")}" placeholder="${esc(tl("napr. husté slučky, rozvetvený"))}"><input class="inp sm nt no-tr" data-occnt value="${esc(o.note || "")}" placeholder="${esc(tl("poznámka"))}"><button class="btn icon ghost sm" data-occrm aria-label="${esc(tl("Odobrať"))}">×</button></div>`; }).join("") || `<p class="hint">${esc(tl("Kde všade tento prúd je a ako hustý – v miestach, zvieratách, rasách, predmetoch alebo len slovom (voda, vzduch). Pri každom zdroji uvidíš potom jeho mix prúdov."))}</p>`}</div>
+    <div class="flowadd"><select class="inp" id="occSrc"><option value="">${esc(tl("+ zdroj zo Sveta…"))}</option>${srcOptions(list.map(o => o.src).filter(Boolean))}</select><button class="btn" id="occAdd">${I.plus}${esc(tl("Pridať"))}</button><button class="btn ghost" id="occAddTxt">${esc(tl("+ slovom"))}</button></div>`;
+  const sv = () => saveEnt(e.id), again = () => mountFlowOwn(box, e);
+  $("#flowPortal", box).onclick = () => openPortalFinder(e.id);
+  $("#flowCol", box).onchange = ev => { e.color = ev.target.value; sv(); again(); };
+  $$("[data-occ]", box).forEach(row => {
+    const o = list.find(x => x.id === row.dataset.occ);
+    $("[data-occtxt]", row)?.addEventListener("input", debounce(ev => { o.txt = ev.target.value; sv(); }, 300));
+    $("[data-occst]", row).oninput = debounce(ev => { o.st = ev.target.value; sv(); }, 300);
+    $("[data-occnt]", row).oninput = debounce(ev => { o.note = ev.target.value; sv(); }, 300);
+    $("[data-occrm]", row).onclick = () => { e.occ = list.filter(x => x !== o); sv(); again(); };
+    $("[data-occgo]", row)?.addEventListener("click", () => openEnt(o.src));
+  });
+  bindDens(box, "[data-occd]", span => list.find(x => x.id === span.closest("[data-occ]").dataset.occ).d || 0, (span, v) => { list.find(x => x.id === span.closest("[data-occ]").dataset.occ).d = v; sv(); again(); });
+  $("#occAdd", box).onclick = () => { const v = $("#occSrc", box).value; if (!v) { toast(tl("Vyber zdroj.")); return; } list.push({ id: uid("oc"), src: v, d: 3 }); sv(); again(); };
+  $("#occAddTxt", box).onclick = () => { list.push({ id: uid("oc"), src: null, txt: "", d: 3 }); sv(); again(); setTimeout(() => { const t = $$("[data-occtxt]", box); t[t.length - 1]?.focus(); }, 30); };
+}
+/* card in any other entry (place, animal, race…): the mix of currents in it */
+function mountFlowHere(box, e) {
+  const list = flowsIn(e.id), have = new Set(list.map(x => x.f.id));
+  box.innerHTML = `<h3>${esc(tl("Magické prúdy"))} ${list.length ? `<span class="mono" style="letter-spacing:0">${list.length}</span>` : ""}</h3>
+    ${mixHtml(list)}
+    <div class="flowtab">${list.map(({ f, o }) => `<div class="flowrow" data-hf="${f.id}" data-ho="${o.id}"><span class="src"><span class="fdot" style="background:${flowColor(f)}"></span><button class="lnk no-tr" data-hgo="${f.id}">${esc(f.name || tl("Bez mena"))}</button></span>${densHtml(o.d, "data-hd", flowColor(f))}<input class="inp sm st no-tr" data-hst value="${esc(o.st || "")}" placeholder="${esc(tl("štruktúra tu"))}"><input class="inp sm nt no-tr" data-hnt value="${esc(o.note || "")}" placeholder="${esc(tl("poznámka"))}"><button class="btn icon ghost sm" data-hrm aria-label="${esc(tl("Odobrať"))}">×</button></div>`).join("") || `<span class="hint">${esc(tl("Aké prúdy tu sú a ako husté."))}</span>`}</div>
+    ${flows().some(f => !have.has(f.id)) ? `<div class="flowadd"><select class="inp" id="hfSel"><option value="">${esc(tl("+ prúd…"))}</option>${flows().filter(f => !have.has(f.id)).map(f => `<option value="${f.id}">${esc(f.name || tl("Bez mena"))}</option>`).join("")}</select><button class="btn" id="hfAdd">${I.plus}${esc(tl("Pridať"))}</button></div>` : ""}`;
+  const again = () => mountFlowHere(box, e), find = row => { const f = S.ents[row.dataset.hf]; return { f, o: (f.occ || []).find(x => x.id === row.dataset.ho) }; };
+  $$("[data-hf]", box).forEach(row => {
+    const { f, o } = find(row);
+    $("[data-hst]", row).oninput = debounce(ev => { o.st = ev.target.value; saveEnt(f.id); }, 300);
+    $("[data-hnt]", row).oninput = debounce(ev => { o.note = ev.target.value; saveEnt(f.id); }, 300);
+    $("[data-hrm]", row).onclick = () => { f.occ = f.occ.filter(x => x !== o); saveEnt(f.id); again(); };
+    $("[data-hgo]", row).onclick = () => openEnt(f.id);
+  });
+  bindDens(box, "[data-hd]", span => find(span.closest("[data-hf]")).o.d || 0, (span, v) => { const { f, o } = find(span.closest("[data-hf]")); o.d = v; saveEnt(f.id); again(); });
+  $("#hfAdd", box)?.addEventListener("click", () => { const f = S.ents[$("#hfSel", box).value]; if (!f) { toast(tl("Vyber prúd.")); return; } occOf(f).push({ id: uid("oc"), src: e.id, d: 3 }); saveEnt(f.id); again(); });
+}
+
+/* ---- colour layer on maps: places tinted by the currents in them ---- */
+const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ""); const n = m ? parseInt(m[1], 16) : 0x888888; return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+function mixColor(list, only) {
+  const L = list.filter(x => (x.o.d || 0) > 0 && (!only || x.f.id === only)); if (!L.length) return null;
+  const tot = L.reduce((s, x) => s + x.o.d, 0), rgb = [0, 0, 0]; L.forEach(x => hexRgb(flowColor(x.f)).forEach((v, i) => rgb[i] += v * x.o.d / tot));
+  const mx = Math.max(...L.map(x => x.o.d));
+  return { c: "rgb(" + rgb.map(Math.round).join(",") + ")", a: .12 + mx * .11, d: mx };
+}
+function flowSvg(m, u) {
+  if (!u.flowsOn || !flows().length) return "";
+  const out = [], M = mapUnit(m);
+  (m.areas || []).forEach(a => { if (!a.ent) return; const mc = mixColor(flowsIn(a.ent), u.flowOnly); if (!mc) return; out.push(`<path d="${shapeD(a.pts, true, a.smooth, m.w, m.h)}" fill="${mc.c}" fill-opacity="${mc.a.toFixed(2)}" stroke="${mc.c}" stroke-opacity=".7" stroke-width="${(M / 400).toFixed(1)}"/>`); });
+  (m.pins || []).forEach(p => { if (!p.ent) return; const list = flowsIn(p.ent).filter(x => x.o.d && (!u.flowOnly || x.f.id === u.flowOnly)); if (!list.length) return;
+    const X = p.x * m.w, Y = p.y * m.h; let r = M / 60; const ring = M / 140;
+    list.forEach(x => { out.push(`<circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="${r.toFixed(1)}" fill="none" stroke="${flowColor(x.f)}" stroke-opacity="${(.3 + x.o.d * .14).toFixed(2)}" stroke-width="${(ring * (.5 + x.o.d * .25)).toFixed(1)}"/>`); r += ring * 1.4; });
+    const mc = mixColor(list); if (mc) out.push(`<circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="${(M / 60).toFixed(1)}" fill="${mc.c}" fill-opacity="${mc.a.toFixed(2)}"/>`);
+  });
+  return `<g class="mflows" pointer-events="none">${out.join("")}</g>`;
+}
+function mountFlowPanel(box, e, u, redraw) {
+  if (!box) return; const fl = flows();
+  if (!u.flowsOn || !fl.length) { box.innerHTML = ""; return; }
+  const m = e.map, ids = new Set([...(m.areas || []), ...(m.pins || [])].map(x => x.ent).filter(Boolean)), used = fl.filter(f => (f.occ || []).some(o => ids.has(o.src)));
+  box.innerHTML = `<div class="mapflows"><div class="trips-h"><b>${esc(tl("Prúdy na mape"))}</b><span class="hint">${esc(tl("Oblasti a špendlíky prepojené s miestom sa zafarbia podľa prúdov, ktoré tam sú – čím hustejší, tým sýtejší. Ťukni na prúd a uvidíš len jeho."))}</span></div>
+    <div class="chips"><button class="chip${!u.flowOnly ? " on" : ""}" data-fonly="">${esc(tl("Všetky prúdy"))}</button>${fl.map(f => `<button class="chip${u.flowOnly === f.id ? " on" : ""}" data-fonly="${f.id}"><span class="fdot" style="background:${flowColor(f)}"></span> <span class="no-tr">${esc(f.name)}</span>${used.includes(f) ? "" : ` <small class="hint">(${esc(tl("nie je na mape"))})</small>`}</button>`).join("")}</div>
+    ${used.length ? "" : `<p class="hint">${esc(tl("Žiadne miesto na tejto mape zatiaľ nemá zapísané prúdy. Zapíšeš ich v zázname miesta (karta Magické prúdy) alebo v zázname prúdu."))}</p>`}</div>`;
+  $$("[data-fonly]", box).forEach(b => b.onclick = () => { u.flowOnly = b.dataset.fonly || null; mountFlowPanel(box, e, u, redraw); redraw(); });
+}
+</script>

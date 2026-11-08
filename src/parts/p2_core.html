@@ -69,13 +69,16 @@ const I = {
 /* ================= domain constants ================= */
 const BASE_CATS = [
   { id: "krajina", name: "Krajiny a miesta", one: "Miesto", fields: ["Typ (kráľovstvo, mesto, región…)", "Podnebie a krajina", "Vláda a moc", "Obyvatelia", "Dejiny", "Zaujímavé miesta"] },
-  { id: "postava", name: "Postavy", one: "Postava", fields: ["Úloha v príbehu", "Vek", "Pôvod / rasa", "Vzhľad", "Povaha", "Motivácia", "Tajomstvo"] },
+  { id: "mapa", name: "Mapy", one: "Mapa", fields: ["Čo zobrazuje", "Obdobie", "Pôvod mapy (kto ju nakreslil)"] },
+  { id: "postava", name: "Postavy", one: "Postava", fields: [{ n: "Úloha v príbehu", key: true, soft: true, opts: ["Hlavná postava", "Hlavná hrdinka / hrdina", "Vedľajšia postava", "Protivník / záporák", "Mentor", "Spojenec", "Milostný záujem", "Rozprávač", "Epizódna postava"] }, "Prezývka", "Vek", "Pôvod / rasa", "Vzhľad", "Povaha", "Motivácia", "Tajomstvo"] },
   { id: "rasa", name: "Rasy a národy", one: "Rasa", fields: [{ n: "Druh", key: true, opts: ["Ľudská rasa", "Elfská / víla", "Trpasličia", "Zvieracia / meňavci", "Obrovská", "Nemŕtva", "Duchovná / éterická", "Démonická / pekelná", "Drakovitá", "Umelo stvorená", "Iná"] }, "Vzhľad a stavba tela", "Dĺžka života a dospievanie", "Domovina a rozšírenie", "Spoločnosť a vláda", "Kultúra, zvyky a viera", "Jazyk a písmo", "Vzťah k mágii", "Zvláštne schopnosti", "Slabosti a obmedzenia", "Pôvod a dejiny", "Postoj k iným rasám"] },
   { id: "nabozenstvo", name: "Náboženstvá", one: "Náboženstvo", fields: ["Božstvá", "Učenie a dogmy", "Rituály a sviatky", "Kňazstvo", "Symboly", "Postoj k mágii"] },
-  { id: "bozstvo", name: "Božstvá", one: "Božstvo", fields: [{ n: "Druh boha", key: true, opts: ["Hlavné božstvo", "Nižšie božstvo", "Polobožstvo", "Prastaré / prvotné božstvo", "Zbožštený smrteľník", "Duch alebo démon", "Zabudnuté či mŕtve božstvo", "Falošné božstvo"] }, "Doména (čomu vládne)", "Podoba a prejavy", "Symboly a posvätné predmety", "Uctievači a kult", "Mýty a legendy", "Vzťah k smrteľníkom"] },
+  { id: "bozstvo", name: "Mytológia", one: "Mytológia", fields: [{ n: "Druh", key: true, opts: ["Hlavné božstvo", "Nižšie božstvo", "Prastaré / prvotné božstvo", "Božská entita", "Zabudnuté či mŕtve božstvo", "Falošné božstvo", "Polobožstvo", "Zbožštený hrdina / zakladateľ", "Zbožštený smrteľník", "Svätec / prorok", "Vyvolený bohov", "Duch", "Démon", "Mýtický tvor", "Strážca", "Svetový strom / kozmická sila", "Posvätný predmet či miesto z mýtov"] }, "Doména / čo stelesňuje", "Podoba a prejavy", "Pôvod, mýty a legendy", "Kult a svätyne", "Symboly a posvätné predmety", "Moc a obmedzenia", "Vzťah k smrteľníkom"] },
   { id: "magia", name: "Mágia", one: "Magický systém", fields: ["Zdroj moci", "Pravidlá", "Cena a obmedzenia", "Kto ju ovláda", "Prejavy a kúzla", "Postoj spoločnosti"] },
+  { id: "prud", name: "Magické prúdy", one: "Magický prúd", fields: [{ n: "Druh", key: true, soft: true, opts: ["Živelný", "Životný", "Duchovný", "Kozmický", "Zmiešaný"] }, "Podstata", "Štruktúra (ako vyzerá, z čoho sa skladá)", "Ako sa ohýba a správa", "Kto s ním pracuje (prúdnici, splietači…)", "Ako sa prejavuje", "Cena a riziká", "Vzťah k iným prúdom"] },
   { id: "frakcia", name: "Rody a frakcie", one: "Frakcia", fields: ["Vodca", "Ciele", "Sídlo", "Znak a farby", "Spojenci a nepriatelia"] },
   { id: "predmet", name: "Artefakty", one: "Artefakt", fields: ["Pôvod", "Schopnosti", "Súčasný držiteľ", "Podoba"] },
+  { id: "pojem", name: "Slovník", one: "Pojem", fields: [{ n: "Druh", key: true, soft: true, opts: ["Slovo", "Meno", "Titul", "Zaklínadlo / kúzlo", "Nadávka / kliatba", "Pozdrav", "Iné"] }, "Výslovnosť", "Význam", "Jazyk / pôvod"] },
   { id: "udalost", name: "Dejiny a udalosti", one: "Udalosť", fields: ["Dátum / éra", "Priebeh", "Účastníci", "Následky"] },
   { id: "poznamka", name: "Poznámky", one: "Poznámka", fields: [] },
 ];
@@ -85,6 +88,35 @@ function setCats(custom) {
   const base = BASE_CATS.filter(c => c.id !== "poznamka"), note = BASE_CATS.find(c => c.id === "poznamka");
   CATS = base.concat((custom || []).map(c => Object.assign({ fields: [] }, c, { custom: true })), [note]);
   CAT = Object.fromEntries(CATS.map(c => [c.id, c]));
+}
+/* mythology (category id "bozstvo"): kinds grouped for the filter in the World list */
+const MYTH_GROUPS = [["Bohovia", ["Hlavné božstvo", "Nižšie božstvo", "Prastaré / prvotné božstvo", "Božská entita", "Zabudnuté či mŕtve božstvo", "Falošné božstvo"]], ["Medzi bohmi a ľuďmi", ["Polobožstvo", "Zbožštený hrdina / zakladateľ", "Zbožštený smrteľník", "Svätec / prorok", "Vyvolený bohov"]], ["Bytosti", ["Duch", "Démon", "Duch alebo démon", "Mýtický tvor", "Strážca"]], ["Posvätné a kozmické", ["Svetový strom / kozmická sila", "Posvätný predmet či miesto z mýtov"]]];
+const mythGroup = kind => { const k = (kind || "").trim().toLowerCase(); if (!k) return null; const g = MYTH_GROUPS.find(([, l]) => l.some(x => x.toLowerCase() === k)); return g ? g[0] : "Iné"; };
+/* older books: deity fields renamed in 1.26 – move the values, nothing is lost */
+const MYTH_RENAME = { "Druh boha": "Druh", "Doména (čomu vládne)": "Doména / čo stelesňuje", "Mýty a legendy": "Pôvod, mýty a legendy", "Uctievači a kult": "Kult a svätyne" };
+function migrateEnt(e) {
+  if (!e || e.cat !== "bozstvo" || !e.fields) return false; let ch = false;
+  Object.entries(MYTH_RENAME).forEach(([o, n]) => { if (o in e.fields) { const v = e.fields[o]; delete e.fields[o]; if (v && !(e.fields[n] || "").trim()) e.fields[n] = v; else if (v) e.fields[n] += "\n" + v; ch = true; } });
+  return ch;
+}
+/* an unexpected error is shown briefly instead of silently leaving a page half drawn */
+window.addEventListener("error", ev => { try { const m = (ev.error && ev.error.message) || ev.message || ""; if (!m || /ResizeObserver|Script error/i.test(m)) return; const now = Date.now(); if (window.__krErr === m && now - (window.__krErrAt || 0) < 8000) return; window.__krErr = m; window.__krErrAt = now; if (typeof toast === "function") toast(tl("Niečo sa pokazilo: {x}", m)); } catch { } });
+/* repair entries that came in incomplete (missing id or name, odd field values) so no list breaks on them */
+function repairEnt(k, e) {
+  let ch = false;
+  if (!e.id) { e.id = k; ch = true; }
+  if (typeof e.name !== "string") { e.name = e.name == null ? "" : String(e.name); ch = true; }
+  if (!e.cat || typeof e.cat !== "string") { e.cat = "poznamka"; ch = true; }
+  if (!e.fields || typeof e.fields !== "object" || Array.isArray(e.fields)) { e.fields = {}; ch = true; }
+  Object.keys(e.fields).forEach(f => { const v = e.fields[f]; if (v != null && typeof v !== "string") { e.fields[f] = String(v); ch = true; } });
+  if (e.forms && !Array.isArray(e.forms)) { e.forms = String(e.forms).split(",").map(x => x.trim()).filter(Boolean); ch = true; }
+  if (typeof e.summary !== "string" && e.summary != null) { e.summary = String(e.summary); ch = true; }
+  return ch;
+}
+function migrateEnts() {
+  const done = [];
+  Object.entries(S.ents || {}).forEach(([k, e]) => { if (!e || typeof e !== "object") { delete S.ents[k]; return; } const a = repairEnt(k, e), b = migrateEnt(e); if (a || b) done.push(e.id); });
+  done.forEach(id => saveEnt(id)); return done.length;
 }
 const catColor = id => CAT[id]?.custom ? CAT[id].color : `var(--c-${CAT[id] ? id : "poznamka"})`;
 const STATUSES = [
@@ -97,6 +129,7 @@ const REL_SUGGEST = {
   "postava>magia": ["ovláda", "učí sa", "je imúnny voči", "bojí sa"], "magia>postava": ["poznačila"],
   "krajina>nabozenstvo": ["vyznáva", "zakazuje", "toleruje"], "nabozenstvo>krajina": ["je rozšírené v", "vzniklo v", "má svätyňu v"],
   "nabozenstvo>magia": ["uznáva", "zakazuje", "je zdrojom"], "magia>nabozenstvo": ["je zakázaná v", "pochádza z"],
+  "prud>prud": ["posilňuje", "oslabuje", "ruší", "ohýba sa k", "odpudzuje", "mieša sa s", "vzniká zo"], "postava>prud": ["ohýba (prúdnik)", "splieta a štruktúruje", "vníma", "čerpá z", "nevidí"], "prud>krajina": ["je silný v", "je slabý v", "zbieha sa v"], "prud>predmet": ["napĺňa", "je uväznený v"], "rasa>prud": ["vníma", "ovláda", "je imúnna voči"], "prud>magia": ["je základom"], "magia>prud": ["čerpá z", "ohýba"],
   "krajina>magia": ["zakazuje", "je zdrojom", "chráni"], "magia>krajina": ["pochádza z", "je viazaná na"],
   "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil"],
   "postava>frakcia": ["vedie", "je členom", "zradil"], "frakcia>krajina": ["sídli v", "vládne", "bojuje proti"],
@@ -104,20 +137,121 @@ const REL_SUGGEST = {
   "udalost>krajina": ["sa odohrala v", "zničila"], "postava>udalost": ["sa zúčastnil", "spôsobil", "prežil"],
 };
 Object.assign(REL_SUGGEST, {
-  "nabozenstvo>bozstvo": ["uctieva", "zavrhuje"], "bozstvo>nabozenstvo": ["je uctievané v", "založilo"], "postava>bozstvo": ["uctieva", "slúži", "zradil", "je dieťaťom"],
+  "nabozenstvo>bozstvo": ["uctieva", "zavrhuje"], "bozstvo>nabozenstvo": ["je uctievané v", "je uctievaný(á) v", "založilo"], "postava>bozstvo": ["uctieva", "slúži", "zradil", "je dieťaťom", "je potomkom", "je vyvoleným", "modlí sa k"],
   "bozstvo>postava": ["požehnalo", "preklialo", "vyvolilo si"], "bozstvo>bozstvo": ["je dieťaťom", "je manželom / manželkou", "je súrodencom", "bojuje proti", "porazilo"],
-  "bozstvo>magia": ["je zdrojom", "zakázalo"], "magia>bozstvo": ["pochádza od"], "bozstvo>krajina": ["chráni", "stvorilo", "prekliatlo"], "krajina>bozstvo": ["uctieva"],
+  "bozstvo>magia": ["je zdrojom", "zakázalo"], "magia>bozstvo": ["pochádza od"], "bozstvo>krajina": ["chráni", "stvorilo", "prekliatlo", "založil(a)", "má svätyňu v", "je patrónom"], "krajina>bozstvo": ["uctieva"],
   "postava>rasa": ["patrí k", "je miešancom", "je vyhnancom z", "nenávidí", "vedie"], "rasa>postava": ["prijala medzi seba", "uctieva", "prenasleduje"],
   "rasa>krajina": ["obýva", "pochádza z", "vládne", "bola vyhnaná z"], "krajina>rasa": ["je domovom", "zotročuje", "toleruje"],
   "rasa>rasa": ["je spojencom", "bojuje proti", "je odnožou", "pohŕda", "obchoduje s", "zotročila"],
   "rasa>bozstvo": ["uctieva", "zavrhla"], "bozstvo>rasa": ["stvorilo", "požehnalo", "preklialo"], "rasa>nabozenstvo": ["vyznáva", "zakazuje"],
   "rasa>magia": ["ovláda", "je imúnna voči", "stvorila", "bojí sa"], "magia>rasa": ["poznačila", "je vrodená pre"], "rasa>frakcia": ["tvorí", "bojuje proti"], "frakcia>rasa": ["prenasleduje", "chráni"],
   "rasa>udalost": ["spôsobila", "prežila", "vymrela počas"], "udalost>rasa": ["zdecimovala", "zjednotila"],
-  "postava>krajina": ["pochádza z", "vládne", "žije v", "putuje do", "odišiel z", "je vyhnancom z"], "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil", "je spojencom", "je rivalom", "pohádal sa s"],
+  "postava>krajina": ["žila tam", "žil tam", "pochádza z", "narodil(a) sa v", "zomrel(a) v", "vládne", "žije v", "ukrýval(a) sa v", "bol(a) väznený(á) v", "putuje do", "odišiel z", "je vyhnancom z"], "postava>postava": ["je otcom", "je matkou", "je súrodencom", "miluje", "nenávidí", "slúži", "je mentorom", "zradil", "je spojencom", "je rivalom", "pohádal sa s"],
 });
+/* nicknames of a character ("Prezývka", several separated by commas) */
+const nicksOf = e => e && e.cat === "postava" ? String((e.fields || {})["Prezývka"] || "").split(/[,;]/).map(x => x.trim()).filter(Boolean) : [];
+/* characters a chapter focuses on: povs of the node's chapter / part ancestors */
+function nodePovs(n) { const out = []; let f = findNode(n.id); if (n.type !== "text" && n.povs) out.push(...n.povs); while (f && f.parent) { out.push(...(f.parent.povs || [])); f = findNode(f.parent.id); } return [...new Set(out)].filter(id => S.ents[id]); }
 const fieldName = f => typeof f === "string" ? f : f.n;
-const keyFieldOf = e => { const f = (CAT[e.cat]?.fields || []).find(x => typeof x === "object" && x.key); return f ? { n: f.n, v: (e.fields || {})[f.n] || "" } : null; };
-const relSuggest = (a, b) => [...new Set([...(REL_SUGGEST[a + ">" + b] || []), "súvisí s", "pozná", "vedie k"])];
+const keyFieldOf = e => { const f = (CAT[e.cat]?.fields || []).find(x => typeof x === "object" && x.key); return f ? { n: f.n, v: String((e.fields || {})[f.n] || "") } : null; };
+/* a two-way link (l.bi) holds in both directions; read from the second entry it uses l.rev (or the same label) */
+const relLab = (l, from) => l.bi && l.b === from ? (l.rev || l.label) : l.label;
+const relArr = (l, from) => l.bi ? "↔" : l.a === from ? "→" : "←";
+const relText = (l, from) => l.bi ? relLab(l, from) + " ↔" : l.a === from ? l.label + " →" : "← " + l.label;
+const relBoth = l => l.bi && l.rev && l.rev !== l.label ? l.label + " / " + l.rev : l.label;
+/* ---------- relationship types: built-in suggestions + the book's own list (S.p.relTypes = [{id, label, pairs: ["postava>krajina"]}]) ---------- */
+const REL_BASE = ["súvisí s", "pozná", "vedie k"];
+const relNorm = s => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+function relBuiltins() { if (!relBuiltins.c) { const set = new Set(REL_BASE); Object.values(REL_SUGGEST).forEach(a => a.forEach(x => set.add(x))); relBuiltins.c = [...set]; } return relBuiltins.c; }
+const relShown = x => typeof tl === "function" ? tl(x) : x;
+const relIsBuiltin = l => { const k = (l || "").trim().toLowerCase(); return relBuiltins().some(x => x.toLowerCase() === k || relShown(x).toLowerCase() === k); };
+function relTypes() {
+  const p = S.p; if (!p) return [];
+  if (!p.relTypes) p.relTypes = [];
+  if (!p.relTypesMig) { p.relTypesMig = 1; (p.links || []).forEach(l => { if (l.label && !relIsBuiltin(l.label) && !p.relTypes.some(t => t.label.toLowerCase() === l.label.toLowerCase())) { const A = S.ents[l.a], B = S.ents[l.b]; p.relTypes.push({ id: uid("rt"), label: l.label, pairs: A && B ? [A.cat + ">" + B.cat] : [] }); } }); }
+  return p.relTypes;
+}
+const relSuggest = (a, b) => { const pair = a + ">" + b, cu = typeof S !== "undefined" && S.p ? relTypes() : []; return [...new Set([...(REL_SUGGEST[pair] || []), ...cu.filter(t => (t.pairs || []).includes(pair)).map(t => t.label), ...REL_BASE, ...cu.filter(t => !(t.pairs || []).includes(pair)).map(t => t.label)])]; };
+function relDist(a, b) {
+  const m = a.length, n = b.length; if (Math.abs(m - n) > 3) return 9; const d = [];
+  for (let i = 0; i <= m; i++) { d[i] = [i]; for (let j = 1; j <= n; j++) d[i][j] = i ? 0 : j; }
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) { const c = a[i - 1] === b[j - 1] ? 0 : 1; d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c); if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1); }
+  return d[m][n];
+}
+const relSimKey = (a, b) => [a.toLowerCase(), b.toLowerCase()].sort().join("\u0001");
+/* is it probably the same word with a typo? (same letters without diacritics, or 1–2 letters apart) */
+function relAlike(a, b) { const x = relNorm(a), y = relNorm(b); if (!x || !y || a.toLowerCase() === b.toLowerCase()) return false; if (x === y) return true; const n = Math.min(x.length, y.length); return relDist(x, y) <= (n <= 8 ? 1 : 2); }
+/* all labels the book knows: built-in (as shown), own list, used on links */
+function relAllLabels() { const set = new Map(); const add = l => { if (l && !set.has(l.toLowerCase())) set.set(l.toLowerCase(), l); }; relBuiltins().forEach(x => add(relShown(x))); relTypes().forEach(t => add(t.label)); (S.p.links || []).forEach(l => add(l.label)); return [...set.values()]; }
+function relSimilar(label) {
+  const ign = new Set(S.p.relSimIgnore || []);
+  return relAllLabels().filter(c => relAlike(label, c) && !ign.has(relSimKey(label, c))).sort((p, q) => relDist(relNorm(label), relNorm(p)) - relDist(relNorm(label), relNorm(q)))[0] || null;
+}
+/* remember a label that is not built in, for these two kinds of entries */
+function relCommit(label, aCat, bCat) {
+  label = (label || "").trim(); if (!label || relIsBuiltin(label)) return;
+  const pair = aCat && bCat ? aCat + ">" + bCat : null, list = relTypes(), t = list.find(x => x.label.toLowerCase() === label.toLowerCase());
+  if (t) { if (pair && !(t.pairs || []).includes(pair)) t.pairs = [...(t.pairs || []), pair]; return; }
+  list.push({ id: uid("rt"), label, pairs: pair ? [pair] : [] });
+  setTimeout(() => toast(tl("Nový vzťah „{x}“ je uložený v zozname vzťahov.", label)), 60);
+}
+/* before saving a relationship: warn about a near-duplicate, then call go(label) */
+function relCheck(label, aCat, bCat, go) {
+  label = (label || "").trim(); if (!label) return go(label);
+  const same = relAllLabels().find(x => x.toLowerCase() === label.toLowerCase());
+  if (same) { relCommit(same, aCat, bCat); return go(same); }
+  const sim = relSimilar(label);
+  if (!sim) { relCommit(label, aCat, bCat); return go(label); }
+  const m = modal(`<h3>${esc(tl("Podobný vzťah už existuje"))}</h3><p>${esc(tl("Vzťah „{x}“ sa podobá na „{x}“, ktorý už v zozname je. Nejde o preklep?", label, sim))}</p>
+    <div class="btnrow"><button class="btn primary" data-use>${esc(tl("Použiť „{x}“", sim))}</button><button class="btn" data-new>${esc(tl("Uložiť „{x}“ ako nový", label))}</button><span class="spacer"></span><button class="btn ghost" data-close>${esc(tl("Späť"))}</button></div>`, "relsim");
+  $("[data-use]", m.el).onclick = () => { m.close(); relCommit(sim, aCat, bCat); go(sim); };
+  $("[data-new]", m.el).onclick = () => { m.close(); S.p.relSimIgnore = [...new Set([...(S.p.relSimIgnore || []), relSimKey(label, sim)])]; relCommit(label, aCat, bCat); go(label); };
+}
+const relCount = l => (S.p.links || []).filter(x => x.label === l).length;
+function relMerge(from, to) {
+  let n = 0; (S.p.links || []).forEach(l => { if (l.label === from) { l.label = to; n++; } });
+  const list = relTypes(), f = list.find(t => t.label === from), t2 = list.find(t => t.label.toLowerCase() === to.toLowerCase());
+  if (f) {
+    if (t2 && t2 !== f) { t2.pairs = [...new Set([...(t2.pairs || []), ...(f.pairs || [])])]; S.p.relTypes = list.filter(t => t !== f); }
+    else if (relIsBuiltin(to)) S.p.relTypes = list.filter(t => t !== f);
+    else f.label = to;
+  }
+  else if (!t2 && !relIsBuiltin(to)) list.push({ id: uid("rt"), label: to, pairs: [] });
+  return n;
+}
+document.addEventListener("click", ev => { const b = ev.target.closest?.("[data-reltypes]"); if (b && S.p) { ev.preventDefault(); openRelTypes(() => { if (S.mode === "world" && typeof renderEDetail === "function") renderEDetail(); else if (S.mode === "graph" && typeof buildGraph === "function") buildGraph(); }); } });
+/* the list of relationship types: rename, merge, delete, possible duplicates */
+function openRelTypes(after) {
+  let m = null;
+  const draw = () => {
+    const list = relTypes().slice().sort((a, b) => a.label.localeCompare(b.label, "sk")), all = relAllLabels().sort((a, b) => a.localeCompare(b, "sk"));
+    const used = [...new Set((S.p.links || []).map(l => l.label).filter(Boolean))], ign = new Set(S.p.relSimIgnore || []);
+    /* only own (not built-in) labels can be typos; for each, the closest other label */
+    const dups = [], pool = [...new Set([...list.map(t => t.label), ...used])].filter(l => !relIsBuiltin(l));
+    pool.forEach(a => { const b = all.filter(c => relAlike(a, c) && !ign.has(relSimKey(a, c))).sort((p, q) => relDist(relNorm(a), relNorm(p)) - relDist(relNorm(a), relNorm(q)) || relCount(q) - relCount(p))[0]; if (b && !dups.some(d => relSimKey(d[0], d[1]) === relSimKey(a, b))) dups.push([a, b]); });
+    const opts = cur => all.filter(x => x !== cur).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join("");
+    const html = `<div class="rt-h"><h3>${esc(tl("Vlastné vzťahy"))}</h3><button class="btn icon ghost" data-close aria-label="${esc(tl("Zavrieť"))}">×</button></div>
+      <p class="hint">${esc(tl("Vzťah, ktorý nie je medzi návrhmi, sa po prvom použití uloží sem a ponúka sa pri ďalšom prepájaní. Premenovanie alebo zlúčenie sa prepíše vo všetkých prepojeniach."))}</p>
+      ${dups.length ? `<div class="rt-dups"><div class="lbl">${esc(tl("Možné duplicity"))}</div>${dups.map(([a, b], i) => `<div class="rt-dup"><span><b class="no-tr">${esc(a)}</b> <small class="hint">${relCount(a)}×</small> ↔ <b class="no-tr">${esc(b)}</b> <small class="hint">${relCount(b)}×</small></span><span class="btnrow"><button class="btn sm" data-dm="${i}|0">${esc(tl("Nechať „{x}“", b))}</button><button class="btn sm" data-dm="${i}|1">${esc(tl("Nechať „{x}“", a))}</button><button class="btn sm ghost" data-dok="${i}">${esc(tl("Nie je to duplicita"))}</button></span></div>`).join("")}</div>` : ""}
+      <div class="rt-list">${list.map(t => { const n = relCount(t.label); return `<div class="rt-row" data-rt="${t.id}"><input class="inp no-tr" data-rtl value="${esc(t.label)}" aria-label="${esc(tl("Názov vzťahu"))}"><small class="hint rt-n">${n ? tl("{x}× použité", n) : tl("nepoužité")}</small><select class="inp rt-m" data-rtm><option value="">${esc(tl("Zlúčiť do…"))}</option>${opts(t.label)}</select><button class="btn sm ghost danger" data-rtdel${n ? ` disabled title="${esc(tl("Vzťah je použitý – najprv ho zlúč do iného."))}"` : ""}>${esc(tl("Zmazať"))}</button></div>`; }).join("") || `<p class="hint">${esc(tl("Zatiaľ žiadne vlastné vzťahy. Stačí pri prepájaní napísať vzťah, ktorý v návrhoch nie je."))}</p>`}</div>
+      <div class="rt-add"><input class="inp" id="rtNew" placeholder="${esc(tl("Nový vzťah, napr. bojoval po boku"))}" autocomplete="off"><button class="btn" id="rtAdd">${I.plus}${esc(tl("Pridať"))}</button></div>`;
+    if (!m) m = modal(html, "reltypes"); else $(".kmodal-in", m.el).innerHTML = html;
+    const el = m.el, changed = msg => { saveProject(); if (msg) toast(msg); draw(); after && after(); };
+    $$("[data-close]", el).forEach(b => b.onclick = () => m.close());
+    $$("[data-rt]", el).forEach(row => {
+      const t = relTypes().find(x => x.id === row.dataset.rt), inp = $("[data-rtl]", row);
+      const ren = () => { const v = inp.value.trim(); if (!v || v === t.label) { inp.value = t.label; return; } const ex = relAllLabels().find(x => x.toLowerCase() === v.toLowerCase() && x !== t.label); if (ex) { const n = relMerge(t.label, ex); changed(tl("Zlúčené do „{x}“ ({x} prepojení).", ex, n)); return; } const old = t.label, n = relMerge(old, v); changed(tl("Premenované ({x} prepojení).", n)); };
+      inp.addEventListener("change", ren); inp.addEventListener("keydown", ev => { if (ev.key === "Enter") inp.blur(); });
+      $("[data-rtm]", row).onchange = ev => { const to = ev.target.value; if (!to) return; const n = relMerge(t.label, to); changed(tl("Zlúčené do „{x}“ ({x} prepojení).", to, n)); };
+      $("[data-rtdel]", row).onclick = () => { S.p.relTypes = relTypes().filter(x => x !== t); changed(tl("Vzťah je odstránený zo zoznamu.")); };
+    });
+    $$("[data-dm]", el).forEach(b => b.onclick = () => { const [i, k] = b.dataset.dm.split("|").map(Number), [a, c] = dups[i], from = k ? c : a, to = k ? a : c; const n = relMerge(from, to); changed(tl("Zlúčené do „{x}“ ({x} prepojení).", to, n)); });
+    $$("[data-dok]", el).forEach(b => b.onclick = () => { const [a, c] = dups[+b.dataset.dok]; S.p.relSimIgnore = [...new Set([...(S.p.relSimIgnore || []), relSimKey(a, c)])]; changed(); });
+    const add = () => { const v = $("#rtNew", el).value.trim(); if (!v) return; relCheck(v, null, null, l => { if (!relTypes().some(t => t.label.toLowerCase() === l.toLowerCase()) && !relIsBuiltin(l)) relTypes().push({ id: uid("rt"), label: l, pairs: [] }); if (!m.el.isConnected) { m = null; } changed(); if (!m) openRelTypes(after); }); };
+    $("#rtAdd", el).onclick = add; $("#rtNew", el).onkeydown = ev => { if (ev.key === "Enter") add(); };
+  };
+  draw();
+}
 
 /* ================= storage ================= */
 const Store = {
@@ -160,17 +294,28 @@ const Store = {
 };
 
 /* write queue: one in-flight write per document, latest state wins */
-const Q = { pending: new Map(), inflight: new Set(), timer: null, err: null };
+/* save queue: every change restarts a 2-second countdown; while typing without a pause it still saves every 20 s */
+const Q = { pending: new Map(), inflight: new Set(), timer: null, err: null, first: 0, last: new Map() };
+const SAVE_IDLE = 2000, SAVE_MAX = 20000;
 function qset(path, getData) { Q.pending.set(path, { getData }); schedFlush(); }
 function qdel(path) { Q.pending.set(path, { del: true }); schedFlush(); }
-function schedFlush(ms = 900) { setSave("busy"); clearTimeout(Q.timer); Q.timer = setTimeout(flush, ms); }
+function schedFlush(ms = SAVE_IDLE) { setSave("busy"); clearTimeout(Q.timer); if (!Q.first) Q.first = Date.now(); Q.timer = setTimeout(flush, Math.max(0, Math.min(ms, Q.first + SAVE_MAX - Date.now()))); }
 async function flush() {
-  clearTimeout(Q.timer);
+  clearTimeout(Q.timer); Q.first = 0;
   const jobs = [...Q.pending.entries()].filter(([p]) => !Q.inflight.has(p));
+  let changed = false;
   await Promise.all(jobs.map(async ([path, job]) => {
     Q.pending.delete(path); Q.inflight.add(path);
     try {
-      if (job.del) await Store.del(path); else { const d = job.getData(); if (d) await Store.set(path, d); }
+      if (job.del) { await Store.del(path); Q.last.delete(path); changed = true; }
+      else {
+        const d = job.getData();
+        if (d) {
+          /* skip writes that change nothing (e.g. only clicking around) */
+          const { updated, ...cmp } = d, sig = JSON.stringify(cmp);
+          if (Q.last.get(path) !== sig) { if ("updated" in d && S.p && path === projPath(S.p.id)) d.updated = S.p.updated = Date.now(); await Store.set(path, d); Q.last.set(path, sig); changed = true; }
+        }
+      }
       Q.err = null;
     } catch (e) {
       console.error("save", path, e);
@@ -178,7 +323,7 @@ async function flush() {
       if (!Q.pending.has(path) && e && e.code === "unavailable") Q.pending.set(path, job);
     } finally { Q.inflight.delete(path); }
   }));
-  if (Q.pending.size) schedFlush(Q.err ? 4000 : 300); else { setSave(Q.err ? "err" : "ok"); if (S.p && typeof Sync !== "undefined") Sync.schedule(S.p.id); }
+  if (Q.pending.size) schedFlush(Q.err ? 4000 : 300); else { if (changed && S.p && typeof Sync !== "undefined" && Sync.dir && Store.mode !== "cloud") Sync.markDirty(S.p.id); setSave(Q.err ? "err" : "ok"); if (changed && S.p && typeof Sync !== "undefined") Sync.schedule(S.p.id, 200); }
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
 function setSave(s) {
@@ -190,6 +335,7 @@ function setSave(s) {
     (sy && sy.state === "need" && s !== "busy" ? ' · <button class="btn sm" id="syncGrantTop">Povoliť priečinok</button>' : "") +
     (sy && sy.state === "ok" && sy.err && s !== "busy" ? ' · <span style="color:var(--danger)">súbor sa neuložil</span>' : "");
   const g = el.querySelector("#syncGrantTop"); if (g) g.onclick = () => Sync.grant();
+  if (typeof renderNeedBar === "function") renderNeedBar();
 }
 
 /* ================= state ================= */
@@ -197,18 +343,23 @@ const S = {
   view: "home", projects: [], p: null, items: {}, ents: {},
   mode: "write", sel: null, ent: null, cat: "all", q: "", eq: "",
   corkView: "cards", insp: false, mobBinder: false, worldPane: "list",
-  graph: { mode: "net", root: null, off: new Set(), labels: true, sel: null, src: null, view: { x: 0, y: 0, k: 1 } },
+  graph: { mode: "net", root: null, off: new Set(["mapa", "pojem"]), labels: true, sel: null, src: null, view: { x: 0, y: 0, k: 1 } },
   newForm: false, confirm: null,
 };
 const P = () => S.p;
 const projPath = id => "projects/" + id;
 const itemPath = (pid, id) => "projects/" + pid + "/items/" + id;
 const entPath = (pid, id) => "projects/" + pid + "/ents/" + id;
-function saveProject() { const p = S.p; if (!p) return; p.updated = Date.now(); p.words = totalWords(); p.entCount = Object.keys(S.ents).length; touchDaily(); const id = p.id; qset(projPath(id), () => (S.p && S.p.id === id ? projDoc(S.p) : null)); }
+function saveProject() { const p = S.p; if (!p) return; p.words = totalWords(); p.entCount = Object.keys(S.ents).length; touchDaily(); const id = p.id; qset(projPath(id), () => (S.p && S.p.id === id ? projDoc(S.p) : null)); }
 function projDoc(p) { const { id, ...rest } = p; return clone(rest); }
-function saveItem(id) { const pid = S.p.id; qset(itemPath(pid, id), () => { const it = S.items[id]; return it ? { html: it.html || "", notes: it.notes || "" } : null; }); }
+function saveItem(id) { S.textRev = (S.textRev || 0) + 1; const pid = S.p.id; qset(itemPath(pid, id), () => { const it = S.items[id]; return it ? { html: it.html || "", notes: it.notes || "" } : null; }); }
 function saveEnt(id) { const pid = S.p.id; qset(entPath(pid, id), () => { const e = S.ents[id]; if (!e) return null; const { id: _x, ...r } = e; return clone(r); }); saveProject(); }
 
+/* which chapters are expanded is remembered per device, not in the book (so clicking around never changes the files) */
+const UIO = { pid: null, map: {} };
+function uiOpenMap() { if (!S.p) return {}; if (UIO.pid !== S.p.id) { UIO.pid = S.p.id; try { UIO.map = JSON.parse(localStorage.getItem("kronikar:open:" + S.p.id) || "{}"); } catch { UIO.map = {}; } } return UIO.map; }
+function isOpen(n) { const m = uiOpenMap(); return n.id in m ? !!m[n.id] : n.open !== false; }
+function setOpen(n, v) { const m = uiOpenMap(); m[n.id] = !!v; try { localStorage.setItem("kronikar:open:" + S.p.id, JSON.stringify(m)); } catch { } }
 /* tree helpers */
 function walk(nodes, fn, parent = null, depth = 0) { for (let i = 0; i < nodes.length; i++) { const n = nodes[i]; if (fn(n, parent, i, depth) === false) return false; if (n.children && walk(n.children, fn, n, depth + 1) === false) return false; } }
 function findNode(id) { let r = null; walk(S.p.binder, (n, par, i) => { if (n.id === id) { r = { n, parent: par, i, list: par ? par.children : S.p.binder }; return false; } }); return r; }
@@ -218,7 +369,7 @@ function nodeChars(n) { if (n.type === "text") return n.chars ?? (n.chars = coun
 function totalChars() { return S.p ? S.p.binder.reduce((a, n) => a + nodeChars(n), 0) : 0; }
 function totalWords() { return S.p ? S.p.binder.reduce((a, n) => a + nodeWords(n), 0) : 0; }
 function isAncestor(aId, bId) { const a = findNode(aId); if (!a) return false; let hit = false; walk(a.n.children || [], n => { if (n.id === bId) { hit = true; return false; } }); return hit; }
-function entsBy(cat) { return Object.values(S.ents).filter(e => !cat || cat === "all" || e.cat === cat).sort((a, b) => a.name.localeCompare(b.name, "sk")); }
+function entsBy(cat) { return Object.values(S.ents).filter(e => e && (!cat || cat === "all" || e.cat === cat)).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "sk")); }
 
 function touchDaily() {
   const p = S.p, d = today(), tw = totalWords();
@@ -230,4 +381,24 @@ function touchDaily() {
     const keys = Object.keys(p.history).sort(); while (keys.length > 90) delete p.history[keys.shift()];
   }
 }
+
+/* ---- 1.35: light / dark theme chosen in the app (per device), or following the system ---- */
+const THEME = { get() { try { const v = localStorage.getItem("kronikar:theme"); return v === "light" || v === "dark" ? v : "auto"; } catch { return "auto"; } } };
+function applyTheme(v) {
+  v = v || THEME.get(); const r = document.documentElement;
+  if (v === "auto") delete r.dataset.theme; else r.dataset.theme = v;
+  const dark = v === "dark" || (v === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#101318" : "#2E6B66");
+}
+function setTheme(v) {
+  try { if (v === "auto") localStorage.removeItem("kronikar:theme"); else localStorage.setItem("kronikar:theme", v); } catch { }
+  applyTheme(v);
+  if (typeof render === "function") render();
+}
+const THEME_NAMES = { auto: "Podľa systému", light: "Svetlý", dark: "Tmavý" };
+function themeIcon(v) { v = v || THEME.get(); return v === "dark" ? '<svg viewBox="0 0 16 16"><path d="M13.3 10.1A5.6 5.6 0 0 1 5.9 2.7a5.6 5.6 0 1 0 7.4 7.4z" fill="currentColor"/></svg>' : v === "light" ? '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="currentColor"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' : '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/></svg>'; }
+function themeBtnHtml() { const v = THEME.get(); return `<button class="btn icon ghost tb-refresh" id="tbTheme" title="${esc(tl("Motív"))}: ${esc(tl(THEME_NAMES[v]))}" aria-label="${esc(tl("Motív"))}: ${esc(tl(THEME_NAMES[v]))}">${themeIcon(v)}</button>`; }
+function bindThemeBtn() { const b = document.getElementById("tbTheme"); if (!b) return; b.onclick = () => { const order = ["auto", "light", "dark"], v = order[(order.indexOf(THEME.get()) + 1) % 3]; setTheme(v); toast(tl("Motív") + ": " + tl(THEME_NAMES[v])); }; }
+try { window.matchMedia && matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme()); } catch { }
+applyTheme();
 </script>

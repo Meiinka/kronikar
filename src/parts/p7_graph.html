@@ -7,12 +7,13 @@ const G = { nodes: [], byId: {}, edges: [] };
 
 function renderGraph(main) {
   const g = S.graph;
+  if (g.mode === "fam") { stopSim(); return renderFamily(main); }
   const ents = Object.values(S.ents);
   if (!g.root || !S.ents[g.root]) { const deg = id => (S.p.links || []).filter(l => l.a === id || l.b === id).length; const pick = l => l.sort((a, b) => deg(b.id) - deg(a.id))[0]; g.root = (pick(entsBy("krajina")) || pick(entsBy("all")) || {}).id || null; }
   main.innerHTML = `<div class="graph-wrap" style="flex:1">
     <div class="graph-main">
       <div class="gtools">
-        <div class="seg" role="group" aria-label="Zobrazenie"><button data-gm="net" class="${g.mode === "net" ? "on" : ""}">Sieť</button><button data-gm="tree" class="${g.mode === "tree" ? "on" : ""}">Strom</button></div>
+        <div class="seg" role="group" aria-label="Zobrazenie"><button data-gm="net" class="${g.mode === "net" ? "on" : ""}">Sieť</button><button data-gm="tree" class="${g.mode === "tree" ? "on" : ""}">Strom</button><button data-gm="fam">${esc(tl("Rodokmeň"))}</button></div>
         ${g.mode === "tree" ? `<label class="chk" style="gap:6px"><span class="hint">Koreň</span><select class="inp" id="gRoot" style="width:auto;max-width:200px;padding:4px 8px">${allEntOptions().replace(`value="${g.root}"`, `value="${g.root}" selected`)}</select></label>` : ""}
         <button class="btn sm" id="gLabels" aria-pressed="${g.labels}">Popisy vzťahov</button>
         <button class="btn sm" id="gPast" aria-pressed="${g.showPast !== false}" title="Zobraziť aj vzťahy, ktoré už neplatia">Minulé vzťahy</button>
@@ -131,9 +132,9 @@ function drawGraph() {
   const ge = $("#gedges"), gl = $("#glabels"), gn = $("#gnodes"); if (!ge) return;
   const g = S.graph, sel = g.sel && G.byId[g.sel] ? g.sel : null;
   const nb = new Set(); if (sel) { nb.add(sel); G.edges.forEach(ed => { if (ed.s.id === sel) nb.add(ed.t.id); if (ed.t.id === sel) nb.add(ed.s.id); }); }
-  ge.innerHTML = G.edges.map((ed, i) => { const hi = sel && (ed.s.id === sel || ed.t.id === sel); if (g.mode === "tree" && !ed.tree && !hi) return ""; return `<path class="edge${ed.l.past ? " past" : ""}${g.mode === "tree" && !ed.tree ? " extra" : ""}${hi ? " hi" : ""}${sel && !hi ? " dim" : ""}" data-ei="${i}" marker-end="url(#${hi ? "arrhi" : "arr"})" d="${edgePath(ed)}"/>`; }).join("");
+  ge.innerHTML = G.edges.map((ed, i) => { const hi = sel && (ed.s.id === sel || ed.t.id === sel); if (g.mode === "tree" && !ed.tree && !hi) return ""; return `<path class="edge${ed.l.past ? " past" : ""}${g.mode === "tree" && !ed.tree ? " extra" : ""}${hi ? " hi" : ""}${sel && !hi ? " dim" : ""}" data-ei="${i}" marker-end="url(#${hi ? "arrhi" : "arr"})"${ed.l.bi ? ` marker-start="url(#${hi ? "arrhi" : "arr"})"` : ""} d="${edgePath(ed)}"/>`; }).join("");
   gl.innerHTML = g.labels ? G.edges.map((ed, i) => (g.mode === "tree" && !ed.tree) ? "" : `<text class="elab${sel && !(ed.s.id === sel || ed.t.id === sel) ? " dim" : ""}" data-li="${i}" text-anchor="middle"></text>`).join("") : "";
-  $$("text[data-li]", gl).forEach(t => { const l = G.edges[+t.dataset.li].l; t.textContent = l.label + (l.past ? " (predtým)" : ""); if (l.past) t.classList.add("past"); });
+  $$("text[data-li]", gl).forEach(t => { const l = G.edges[+t.dataset.li].l; t.textContent = relBoth(l) + (l.past ? " (predtým)" : ""); if (l.past) t.classList.add("past"); });
   gn.innerHTML = G.nodes.map(n => `<g class="node${sel && !nb.has(n.id) ? " dim" : ""}${n.id === sel ? " sel" : ""}${n.id === g.src ? " src" : ""}" data-n="${n.id}" tabindex="0" role="button" aria-label="${esc(n.e.name)}"><circle r="${n.r}" fill="${catColor(n.e.cat)}"/><text text-anchor="${g.mode === "tree" ? "start" : "middle"}"></text><title></title></g>`).join("");
   $$("g.node", gn).forEach(el => { const n = G.byId[el.dataset.n]; el.querySelector("text").textContent = n.e.name || "Bez mena"; el.querySelector("title").textContent = (CAT[n.e.cat]?.one || "") + (n.e.summary ? ": " + n.e.summary : ""); el.onkeydown = ev => { if (ev.key === "Enter") nodeClick(n.id); }; });
   drawPositions();
@@ -217,8 +218,9 @@ function renderGSide() {
       <label class="field"><span>Vzťah</span><input class="inp" id="gpLabel" list="gpSug" placeholder="napr. ovláda" autocomplete="off"></label>
       <datalist id="gpSug">${relSuggest(a.cat, b.cat).map(s => `<option value="${esc(s)}">`).join("")}</datalist>
       <div class="chips">${relSuggest(a.cat, b.cat).slice(0, 6).map(s => `<button class="chip link" data-sugg="${esc(s)}">${esc(s)}</button>`).join("")}</div>
-      <div class="btnrow"><button class="btn primary" id="gpSave">Uložiť vzťah</button><button class="btn" id="gpSwap">Otočiť smer</button><button class="btn ghost" id="gpCancel">Zrušiť</button></div>`;
-    const save = () => { S.p.links.push({ id: uid("l"), a: g.pending.a, b: g.pending.b, label: $("#gpLabel").value.trim() || "súvisí s" }); g.pending = null; saveProject(); buildGraph(); toast("Prepojenie uložené."); };
+      <label class="chk"><input type="checkbox" id="gpBi"> ↔ ${esc(tl("Obojstranný vzťah – platí aj opačne"))}</label>
+      <div class="btnrow"><button class="btn primary" id="gpSave">Uložiť vzťah</button><button class="btn" id="gpSwap">Otočiť smer</button><button class="btn ghost" id="gpCancel">Zrušiť</button></div><button class="lnk hint rt-open" data-reltypes>${esc(tl("Upraviť zoznam vzťahov"))}</button>`;
+    const save = () => { const pa = g.pending.a, pb = g.pending.b; relCheck($("#gpLabel").value.trim() || "súvisí s", a.cat, b.cat, label => { S.p.links.push(Object.assign({ id: uid("l"), a: pa, b: pb, label }, $("#gpBi")?.checked ? { bi: true } : {})); g.pending = null; saveProject(); buildGraph(); toast("Prepojenie uložené."); }); };
     $("#gpSave").onclick = save; $("#gpLabel").onkeydown = e => { if (e.key === "Enter") save(); };
     $$("[data-sugg]", el).forEach(b => b.onclick = () => { $("#gpLabel").value = b.dataset.sugg; $("#gpLabel").focus(); });
     $("#gpSwap").onclick = () => { g.pending = { a: g.pending.b, b: g.pending.a }; renderGSide(); };
@@ -239,11 +241,11 @@ function renderGSide() {
     <h3 style="font-family:var(--f-display);font-size:22px;margin:0;line-height:1.2">${esc(e.name || "Bez mena")}</h3>
     ${e.summary ? `<p class="muted" style="margin:0;font-family:var(--f-display);font-style:italic">${esc(e.summary)}</p>` : ""}
     <div class="btnrow"><button class="btn sm primary" id="gOpen">Otvoriť vo Svete</button><button class="btn sm" id="gAsRoot">${I.tree}Strom odtiaľto</button></div>
-    <div class="insp-sec"><span class="lbl">Prepojenia</span>${links.length ? `<div class="rels">${links.slice().sort((a, b) => (a.past ? 1 : 0) - (b.past ? 1 : 0)).map(l => { const out = l.a === e.id, o = S.ents[out ? l.b : l.a]; return `<div class="rel${l.past ? " past" : ""}" style="grid-template-columns:minmax(0,1fr) auto auto"><button class="tgt" data-gsel="${o.id}"><span class="cd" style="background:${catColor(o.cat)}"></span><span><i class="hint">${out ? esc(l.label) + " →" : "← " + esc(l.label)}</i> ${esc(o.name)}${l.when ? ` <small class="hint">· ${esc(l.when)}</small>` : ""}</span></button><button class="btn sm ghost pastbtn" data-gpast="${l.id}" title="Prepnúť aktuálny / minulý">${l.past ? "minulý" : "aktuálny"}</button><button class="btn icon ghost" data-grm="${l.id}" title="Odstrániť">×</button></div>`; }).join("")}</div>` : '<div class="empty">Bez prepojení.</div>'}</div>
+    <div class="insp-sec"><span class="lbl">Prepojenia</span>${links.length ? `<div class="rels">${links.slice().sort((a, b) => (a.past ? 1 : 0) - (b.past ? 1 : 0)).map(l => { const out = l.a === e.id, o = S.ents[out ? l.b : l.a]; return `<div class="rel${l.past ? " past" : ""}" style="grid-template-columns:minmax(0,1fr) auto auto"><button class="tgt" data-gsel="${o.id}"><span class="cd" style="background:${catColor(o.cat)}"></span><span><i class="hint">${esc(relText(l, e.id))}</i> ${esc(o.name)}${l.when ? ` <small class="hint">· ${esc(l.when)}</small>` : ""}</span></button><button class="btn sm ghost pastbtn" data-gpast="${l.id}" title="Prepnúť aktuálny / minulý">${l.past ? "minulý" : "aktuálny"}</button><button class="btn icon ghost" data-grm="${l.id}" title="Odstrániť">×</button></div>`; }).join("")}</div>` : '<div class="empty">Bez prepojení.</div>'}</div>
     <div class="insp-sec"><span class="lbl">Rýchlo prepojiť</span>
       <input class="inp" id="gqLabel" list="gqSug" placeholder="Vzťah (napr. vyznáva)" autocomplete="off"><datalist id="gqSug"></datalist>
       <select class="inp" id="gqTarget"><option value="">S čím…</option>${allEntOptions([e.id])}</select>
-      <button class="btn" id="gqAdd">${I.link}Prepojiť</button></div>`;
+      <button class="btn" id="gqAdd">${I.link}Prepojiť</button></div><button class="lnk hint rt-open" data-reltypes>${esc(tl("Upraviť zoznam vzťahov"))}</button>`;
   $("#gOpen").onclick = () => openEnt(e.id);
   $("#gAsRoot").onclick = () => { g.root = e.id; g.mode = "tree"; g.fitted = false; renderGraph($("#main")); };
   $$("[data-gsel]", el).forEach(b => b.onclick = () => { g.sel = b.dataset.gsel; drawGraph(); renderGSide(); });
@@ -251,7 +253,7 @@ function renderGSide() {
   $$("[data-grm]", el).forEach(b => b.onclick = () => { S.p.links = S.p.links.filter(l => l.id !== b.dataset.grm); saveProject(); buildGraph(); });
   const tg = $("#gqTarget"), sug = () => { const o = S.ents[tg.value]; $("#gqSug").innerHTML = relSuggest(e.cat, o ? o.cat : "").map(s => `<option value="${esc(s)}">`).join(""); };
   sug(); tg.onchange = sug;
-  $("#gqAdd").onclick = () => { if (!tg.value) { toast("Vyber cieľový záznam."); return; } S.p.links.push({ id: uid("l"), a: e.id, b: tg.value, label: $("#gqLabel").value.trim() || "súvisí s" }); saveProject(); buildGraph(); toast("Prepojené."); };
+  $("#gqAdd").onclick = () => { if (!tg.value) { toast("Vyber cieľový záznam."); return; } const tv = tg.value; relCheck($("#gqLabel").value.trim() || "súvisí s", e.cat, S.ents[tv]?.cat, label => { S.p.links.push({ id: uid("l"), a: e.id, b: tv, label }); saveProject(); buildGraph(); toast("Prepojené."); }); };
 }
 window.addEventListener("resize", debounce(() => { if (S.mode === "graph") fitGraph(); }, 300));
 </script>

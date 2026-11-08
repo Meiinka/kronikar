@@ -14,9 +14,12 @@ Runs on your own devices. No account, no server, no internet required.</p>
 - **Manuscript** split into parts, chapters and scenes, with a corkboard, scene status, POV, word goals and standard-page counts.
 - **World** – characters, places, races, religions, deities, magic, factions, artefacts, events, plus your own categories with custom fields.
 - **Select a word while writing and add it to the world** – Kronikár suggests other forms of the name and later finds every mention in the manuscript.
+- **Maps** – upload an image or draw your own vector map (freehand coasts, rivers, map symbols, labels); pin places, mark territories and terrain, draw routes in layers, link it all to characters and chapters and save the map as JPG or SVG for printing; **photos** for every world entry.
+- **Revision tools** – scene versions with comparison, repetition check, names not in the world, find & replace across the manuscript (also renaming a character with all name forms), writing sprints and reading aloud.
+- **Timeline, plot templates and character arcs** – your world's own calendar, warnings when someone is in two places at once, Save the Cat / Hero's Journey / three acts.
 - **Relationship map** as a network or a tree, including past relationships (“until chapter 7”).
 - **Sticky notes** with categories (To do, Idea, Check…), optionally attached to chapters and scenes.
-- **Export to PDF and Word** – printed-book templates (Classic, Chronicle, Elegant, Modern) and manuscript formats for publishers (Standard, SK/CZ, US Shunn, UK, AU), detailed typesetting, saved templates, contents, book description (logline, blurb, synopsis).
+- **Export to PDF, Word and EPUB** – including a beta reader edition with numbered paragraphs; printed-book templates (Classic, Chronicle, Elegant, Modern) and manuscript formats for publishers (Standard, SK/CZ, US Shunn, UK, AU), detailed typesetting, saved templates, contents, book description (logline, blurb, synopsis).
 - **Smart quotation marks** – American, British, Slovak/Czech, German, French.
 - **Slovak and English** interface; the book language is set separately.
 - **Auto-save to a folder** of your choice, daily backups, and sync between devices with Syncthing or any folder-sync tool.
@@ -40,7 +43,7 @@ Step-by-step instructions, including syncing between computer and phone: [Instal
 
 ## Syncing between devices
 
-Kronikár never sends your writing anywhere. It saves each project as `title.kronikar.json` in a folder you choose and checks that folder for changes every 15 seconds. To write on several devices, keep that folder in sync with a tool such as **[Syncthing](https://syncthing.net)** (Android: *Syncthing-Fork* from Google Play or F-Droid), or OneDrive / Dropbox / Google Drive on desktop.
+Kronikár never sends your writing anywhere. Each book gets its own subfolder in a folder you choose – the structure in `projekt.json`, every scene as its own HTML file in `rukopis/`, the world and notes in separate files and a readable copy of everything in `citatelne/`. Only parts that changed are written, and the folder is checked for changes from other devices every 15 seconds. If the same part is changed on two devices at once, Kronikár tells you which one and lets you choose. To write on several devices, keep that folder in sync with a tool such as **[Syncthing](https://syncthing.net)** (Android: *Syncthing-Fork* from Google Play or F-Droid), or OneDrive / Dropbox / Google Drive on desktop.
 
 ## Building from source
 

@@ -4,7 +4,7 @@ SetCompressor /SOLID lzma
 
 !define APPNAME "Kronikár"
 !define APPID "Kronikar"
-!define VERSION "1.6"
+!define VERSION "1.35"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPID}"
 
 !include "MUI2.nsh"
@@ -17,7 +17,7 @@ InstallDirRegKey HKCU "Software\${APPID}" "InstallDir"
 RequestExecutionLevel user
 BrandingText "${APPNAME} ${VERSION}"
 
-VIProductVersion "1.6.0.0"
+VIProductVersion "1.35.0.0"
 VIAddVersionKey /LANG=1051 "ProductName" "${APPNAME}"
 VIAddVersionKey /LANG=1051 "FileDescription" "Inštalátor aplikácie ${APPNAME}"
 VIAddVersionKey /LANG=1033 "ProductName" "${APPNAME}"

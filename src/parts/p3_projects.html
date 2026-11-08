@@ -31,7 +31,7 @@ async function openProject(id, sel) {
   setCats(S.p.customCats);
   const [items, ents] = await Promise.all([Store.list("projects/" + id + "/items"), Store.list("projects/" + id + "/ents")]);
   S.items = Object.fromEntries(items.map(i => [i.id, i]));
-  S.ents = Object.fromEntries(ents.map(e => [e.id, e]));
+  S.ents = Object.fromEntries(ents.map(e => [e.id, e])); migrateEnts();
   // reconcile words with content
   allTexts().forEach(n => { const it = S.items[n.id]; if (it) { n.words = countWords(htmlToText(it.html)); n.chars = countChars(it.html); } });
   S.view = "project"; S.mode = "write"; S.ent = null; S.cat = "all"; S.q = ""; S.eq = "";
@@ -40,12 +40,13 @@ async function openProject(id, sel) {
   S.sel = first;
   touchDaily();
   render();
-  Sync.schedule(id, 800);
+  /* full check of this book against the folder: remote changes, conflicts left from before */
+  if (Sync.state === "ok") setTimeout(() => Sync.sync(id).then(() => Sync.renderBar()).catch(e => console.warn(e)), 400);
 }
-async function goHome() { await flush(); S.view = "home"; S.p = null; setCats([]); S.catEdit = null; S.items = {}; S.ents = {}; document.body.classList.remove("focus"); render.loading("Načítavam projekty…"); await loadProjects(); render(); }
+async function goHome() { if (SPRINT.on) sprintFinish(false); TTS.stop(true); await flush(); S.view = "home"; S.p = null; setCats([]); S.catEdit = null; S.items = {}; S.ents = {}; document.body.classList.remove("focus"); render.loading("Načítavam projekty…"); await loadProjects(); render(); }
 async function deleteProject(id) {
   render.loading("Mažem projekt…");
-  const meta = S.projects.find(p => p.id === id); if (meta) await Sync.remove(id, meta.title);
+  const meta = S.projects.find(p => p.id === id); if (meta) await Sync.remove(id);
   const [items, ents] = await Promise.all([Store.list("projects/" + id + "/items"), Store.list("projects/" + id + "/ents")]);
   for (const i of items) await Store.del(itemPath(id, i.id));
   for (const e of ents) await Store.del(entPath(id, e.id));
@@ -53,7 +54,7 @@ async function deleteProject(id) {
   S.confirm = null; await loadProjects(); render(); toast("Projekt bol zmazaný.");
 }
 async function exportBackup(id) {
-  const data = await buildBackup(id);
+  const data = await buildBackup(id, { images: true });
   await saveFile(slug(data.project.title) + "-zaloha.json", JSON.stringify(data, null, 1), "application/json");
 }
 async function importBackup(file) {
@@ -65,6 +66,8 @@ async function importBackup(file) {
     render.loading("Obnovujem zálohu…");
     for (const [iid, it] of Object.entries(data.items || {})) await Store.set(itemPath(id, iid), it);
     for (const [eid, e] of Object.entries(data.ents || {})) await Store.set(entPath(id, eid), e);
+    await restoreImages(data.images);
+    await restoreSnaps(id, data.snaps);
     await Store.set(projPath(id), p);
     await loadProjects(); await Sync.push(id); render(); toast("Záloha „" + p.title + "“ bola obnovená.");
   } catch (e) { toast(e.message || "Zálohu sa nepodarilo načítať."); render(); }
@@ -112,8 +115,8 @@ async function createSample() {
   mk("merwen", "postava", "Kráľovná Merwen", "Vládkyňa Vardenu, ktorá zakázala mágiu.", { "Úloha v príbehu": "Protivníčka", "Motivácia": "Už nikdy nedopustiť pád hlavného mesta." });
   mk("kael", "postava", "Kael z Hmly", "Pašerák a spevák hmly z ostrovov.", { "Úloha v príbehu": "Spojenec" });
   mk("kult", "nabozenstvo", "Kult Siedmich plameňov", "Viera, že svet udržiava sedem večných ohňov – a jeden z nich sa stratil.", { "Božstvá": "Sedem plameňov, každý so svojou cnosťou.", "Rituály a sviatky": "Noc bdenia pri ohni na zimný slnovrat.", "Postoj k mágii": "Oficiálne ju odsudzuje, v skutočnosti ju stráži." });
-  mk("aurel", "bozstvo", "Aurel, Prvý plameň", "Najstarší zo siedmich ohňov, boh kovu, pamäti a obety.", { "Druh boha": "Hlavné božstvo", "Doména (čomu vládne)": "Oheň, kováčstvo, pamäť", "Symboly a posvätné predmety": "Kladivo a kruh siedmich iskier" });
-  mk("matka", "bozstvo", "Matka Hmla", "Bezmenná bytosť, ktorá bola na ostrovoch skôr než ľudia.", { "Druh boha": "Prastaré / prvotné božstvo", "Podoba a prejavy": "Hlas v hmle, studený dotyk na zátylku" });
+  mk("aurel", "bozstvo", "Aurel, Prvý plameň", "Najstarší zo siedmich ohňov, boh kovu, pamäti a obety.", { "Druh": "Hlavné božstvo", "Doména / čo stelesňuje": "Oheň, kováčstvo, pamäť", "Symboly a posvätné predmety": "Kladivo a kruh siedmich iskier" });
+  mk("matka", "bozstvo", "Matka Hmla", "Bezmenná bytosť, ktorá bola na ostrovoch skôr než ľudia.", { "Druh": "Prastaré / prvotné božstvo", "Podoba a prejavy": "Hlas v hmle, studený dotyk na zátylku" });
   mk("tichi", "nabozenstvo", "Tichí z hmly", "Ostrovania uctievajú predkov, ktorých hlasy počuť v hmle.");
   mk("runy", "magia", "Runová väzba", "Mágia vyrytá do kameňa. Každá runa si berie kúsok pamäti toho, kto ju vyryl.", { "Zdroj moci": "Runový kameň z vardenských baní.", "Cena a obmedzenia": "Strata spomienok, vždy tých najcennejších.", "Postoj spoločnosti": "Zakázaná, trestá sa smrťou." });
   mk("spev", "magia", "Spev hmly", "Hlasom tvarovaná ilúzia, ktorá funguje len v hmle.", { "Pravidlá": "Bez hmly nefunguje. Čím hustejšia hmla, tým silnejšia ilúzia." });
@@ -134,23 +137,29 @@ async function createSample() {
   const binder = [
     F("Kameň", "part", [
       F("Kováčova dcéra", "chapter", [
-        T("Iskry", "hotovo", "Ilsa v otcovej dielni prvýkrát uvidí runu, ktorá sa sama objaví na rozžeravenej podkove.", p1, { pov: E.ilsa, place: E.varden, ents: [E.runy] }),
-        T("Runa pod kladivom", "revizia", "V noci Ilsa runu skúsi vyryť sama. Ráno zistí, akú cenu za to zaplatila.", p2, { pov: E.ilsa, place: E.varden, ents: [E.runy] }),
+        T("Iskry", "hotovo", "Ilsa v otcovej dielni prvýkrát uvidí runu, ktorá sa sama objaví na rozžeravenej podkove.", p1, { pov: E.ilsa, place: E.varden, ents: [E.runy], time: { from: { y: 352, m: 10, d: 3 } } }),
+        T("Runa pod kladivom", "revizia", "V noci Ilsa runu skúsi vyryť sama. Ráno zistí, akú cenu za to zaplatila.", p2, { pov: E.ilsa, place: E.varden, ents: [E.runy], time: { from: { y: 352, m: 10, d: 4 } } }),
       ], "Ilsin svet sa zmení jedným úderom kladiva."),
       F("Popolní", "chapter", [
-        T("Klopanie v noci", "koncept", "Rad Popolných prichádza do kováčne. Otec ukryje Ilsu na povale.", p3, { pov: E.ilsa, ents: [E.popolni] }),
-        T("Útek", "napad", "Brat Odo vyvedie Ilsu tajnou cestou cez kryptu chrámu. Prvá zmienka o Siedmom plameni.", "", { pov: E.ilsa, ents: [E.odo, E.plamen] }),
+        T("Klopanie v noci", "koncept", "Rad Popolných prichádza do kováčne. Otec ukryje Ilsu na povale.", p3, { pov: E.ilsa, place: E.varden, ents: [E.popolni], time: { from: { y: 352, m: 10, d: 6 } } }),
+        T("Útek", "napad", "Brat Odo vyvedie Ilsu tajnou cestou cez kryptu chrámu. Prvá zmienka o Siedmom plameni.", "", { pov: E.ilsa, place: E.brana, ents: [E.odo, E.plamen], time: { from: { y: 352, m: 10, d: 6 }, to: { y: 352, m: 10, d: 8 } } }),
       ]),
     ], "Prvá časť: Varden, runy a útek."),
     F("Hmla", "part", [
       F("Mlžné ostrovy", "chapter", [
-        T("Pieseň na prove", "napad", "Ilsa a Odo sa nalodia u pašeráka Kaela. V hmle počuť hlasy.", "", { pov: E.ilsa, place: E.ostrovy, ents: [E.kael, E.spev] }),
+        T("Pieseň na prove", "napad", "Ilsa a Odo sa nalodia u pašeráka Kaela. V hmle počuť hlasy.", "", { pov: E.ilsa, place: E.ostrovy, ents: [E.kael, E.spev], time: { from: { y: 352, m: 10, d: 12 } } }),
       ]),
     ]),
   ];
   const p = defaultProject({ title: tl("Sedem plameňov"), subtitle: tl("Ukážkový projekt"), author: tl("Ukážka"), genre: tl("Epická fantasy · ukážka"), binder, links, goals: { total: 100000, daily: 800 } });
   const firstText = binder[0].children[0].children[0].id;
   const ch1 = binder[0].children[0], ch2 = binder[0].children[1];
+  p.cal = { era: tl("po Zjednotení"), months: null, mdays: 30 };
+  [["ilsa", { y: 335, m: 3, d: 14 }], ["odo", { y: 291 }], ["merwen", { y: 301, m: 7 }], ["kael", { y: 329 }], ["varden", { y: 1 }], ["brana", { y: 140 }]].forEach(([k, from]) => ents[E[k]].time = { from });
+  ents[E.noc].time = { from: { y: 312, m: 12, d: 21 } };
+  ents[E.ilsa].arc = { want: tl("Ochrániť otca a nevyčnievať."), need: tl("Prijať, kým je – aj za cenu spomienok."), lie: tl("Mágia je prekliatie, ktoré treba skryť."), truth: tl("Dar patrí jej a ona rozhodne, ako ho použije."),
+    ch: { [ch1.id]: { want: tl("Pomáhať otcovi v dielni."), change: tl("Objaví runový dar a zaplatí zaň spomienkou."), v: 1 }, [ch2.id]: { want: tl("Ukryť sa pred Popolnými."), change: tl("Príde o domov, ale získa mentora."), v: -3 } } };
+  p.plot = { tpl: "three", beats: { setup: ch1.children[0].id, inciting: ch1.children[1].id, pp1: ch2.children[1].id } };
   p.stickies = [
     { id: uid("n"), text: tl("Ilsa by mala pri prvej rune cítiť aj chuť železa v ústach – vrátiť sa k tomu v kapitole 3."), cat: "zapracovat", refs: [ch1.children[0].id], done: false, created: Date.now(), updated: Date.now() },
     { id: uid("n"), text: tl("Koľko rokov presne prešlo od Noci sklenených veží? Zjednotiť s Odovým vekom."), cat: "overit", refs: [ch2.id], done: false, created: Date.now(), updated: Date.now() },

@@ -5,30 +5,33 @@
   if (!A) return;
   document.documentElement.classList.add("android-app");
   const notFound = () => Object.assign(new Error("Súbor neexistuje"), { name: "NotFoundError" });
-  const fileHandle = (dir, name) => ({
+  const join = (dir, name) => dir ? dir + "/" + name : name;
+  /* meta from the folder listing saves one lookup per file */
+  const fileHandle = (dir, name, meta) => ({
     kind: "file", name,
     async getFile() {
-      const raw = A.stat(dir, name); if (!raw) throw notFound();
-      const m = JSON.parse(raw);
-      return { name, lastModified: m.lm || 0, size: m.size || 0, async text() { const t = A.read(dir, name); if (t === null || t === undefined) throw notFound(); return t; } };
+      let m = meta; meta = null;
+      if (!m) { const raw = A.stat(dir, name); if (!raw) throw notFound(); m = JSON.parse(raw); }
+      return { name, lastModified: m.lm || 0, size: m.size || 0, async text() { const t = A.read(dir, name); if (t === null || t === undefined) throw notFound(); return t; },
+        async blob() { const b = A.readBase64 ? A.readBase64(dir, name) : null; if (b === null || b === undefined) throw notFound(); const bin = atob(b), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: /\.jpe?g$/i.test(name) ? "image/jpeg" : "application/octet-stream" }); } };
     },
     async createWritable() {
-      let buf = "";
+      let buf = "", bin = null;
       return {
-        async write(d) { buf += typeof d === "string" ? d : await new Response(d).text(); },
-        async close() { if (!A.write(dir, name, buf)) throw Object.assign(new Error("Zápis do priečinka zlyhal"), { name: "NotAllowedError" }); },
+        async write(d) { if (typeof d === "string") buf += d; else (bin = bin || []).push(d); },
+        async close() { const ok = bin ? A.writeBase64(dir, name, await blobToB64(new Blob(bin))) : A.write(dir, name, buf); if (!ok) throw Object.assign(new Error("Zápis do priečinka zlyhal"), { name: "NotAllowedError" }); },
       };
     },
   });
   const dirHandle = dir => ({
-    kind: "directory", name: dir || A.folderName(),
+    kind: "directory", name: dir ? dir.split("/").pop() : A.folderName(),
     async *entries() {
       const raw = A.list(dir);
       if (raw === null || raw === undefined) throw Object.assign(new Error("Priečinok nie je dostupný"), { name: "NotAllowedError" });
-      for (const it of JSON.parse(raw)) yield [it.name, it.kind === "directory" ? dirHandle(it.name) : fileHandle(dir, it.name)];
+      for (const it of JSON.parse(raw)) yield [it.name, it.kind === "directory" ? dirHandle(join(dir, it.name)) : fileHandle(dir, it.name, it)];
     },
     async getFileHandle(name, opt = {}) { if (!opt.create && !A.stat(dir, name)) throw notFound(); return fileHandle(dir, name); },
-    async getDirectoryHandle(name, opt = {}) { if (opt.create ? !A.ensureDir(name) : !A.stat("", name)) throw notFound(); return dirHandle(name); },
+    async getDirectoryHandle(name, opt = {}) { const p = join(dir, name); if (opt.create ? !A.ensureDir(p) : !A.stat(dir, name)) throw notFound(); return dirHandle(p); },
     async removeEntry(name) { A.remove(dir, name); },
     async queryPermission() { return A.hasFolder() ? "granted" : "prompt"; },
     async requestPermission() { return A.hasFolder() ? "granted" : "denied"; },
@@ -40,6 +43,7 @@
   });
   /* system back button: leave focus mode, side panels, then the project */
   window.__androidBack = () => {
+    const ov = document.querySelector(".kmodal, .lightbox"); if (ov) { ov.remove(); return true; }
     if (document.body.classList.contains("focus")) { document.body.classList.remove("focus"); return true; }
     if (typeof S === "undefined") return false;
     if (S.view === "project" && S.mode === "write" && (S.insp || S.mobBinder)) { S.insp = false; S.mobBinder = false; if (typeof wsClass === "function") wsClass(); return true; }
@@ -48,7 +52,7 @@
     if (S.view === "project") { goHome(); return true; }
     return false;
   };
-  window.__androidPause = () => { try { if (typeof flushEditor === "function") flushEditor(); flush().then(() => { if (S.p && Sync.state === "ok") Sync.push(S.p.id); }); } catch (e) { console.warn(e); } return true; };
+  window.__androidPause = () => { try { if (typeof flushEditor === "function") flushEditor(); flush().then(() => { if (S.p && Sync.state === "ok") Sync.push(S.p.id, { readable: true }); }); } catch (e) { console.warn(e); } return true; };
   window.__androidResume = () => { try { if (Sync.state === "ok") Sync.poll(); } catch { } return true; };
 })();
 </script>
